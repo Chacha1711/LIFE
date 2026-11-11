@@ -8,6 +8,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -44,7 +47,12 @@ data class Mission(
     val xp: Int,
     val coins: Int,
     val icon: String,
-    val done: Boolean = false
+    val done: Boolean = false,
+    val validation: String = "manual",
+    val photoMode: String = "single",
+    val timerMinutes: Int = 30,
+    val beforePhotoUri: String? = null,
+    val afterPhotoUri: String? = null
 )
 
 data class Pet(
@@ -91,7 +99,12 @@ private fun loadMissions(prefs: SharedPreferences, today: LocalDate): Map<String
                 list.add(Mission(
                     item.optInt("id"), item.optString("title"), item.optString("detail"),
                     item.optInt("xp"), item.optInt("coins"), item.optString("icon", "⭐"),
-                    item.optBoolean("done", false)
+                    item.optBoolean("done", false),
+                    item.optString("validation", "manual"),
+                    item.optString("photoMode", "single"),
+                    item.optInt("timerMinutes", 30),
+                    item.optString("beforePhotoUri").takeIf { it.isNotBlank() },
+                    item.optString("afterPhotoUri").takeIf { it.isNotBlank() }
                 ))
             }
             result[date] = list
@@ -107,7 +120,11 @@ private fun encodeMissions(data: Map<String, List<Mission>>): String {
         list.forEach { m ->
             array.put(JSONObject().put("id", m.id).put("title", m.title)
                 .put("detail", m.detail).put("xp", m.xp).put("coins", m.coins)
-                .put("icon", m.icon).put("done", m.done))
+                .put("icon", m.icon).put("done", m.done)
+                .put("validation", m.validation).put("photoMode", m.photoMode)
+                .put("timerMinutes", m.timerMinutes)
+                .put("beforePhotoUri", m.beforePhotoUri ?: "")
+                .put("afterPhotoUri", m.afterPhotoUri ?: ""))
         }
         root.put(date, array)
     }
@@ -230,7 +247,7 @@ fun LifeApp() {
                     petStage = petStage,
                     petXp = petXp,
 
-                    onAddMission = { title, detail, rewardXp, rewardCoins, icon ->
+                    onAddMission = { title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
 
                         val newMission = Mission(
                             nextMissionId,
@@ -238,7 +255,10 @@ fun LifeApp() {
                             detail,
                             rewardXp,
                             rewardCoins,
-                            icon
+                            icon,
+                            validation = validation,
+                            photoMode = photoMode,
+                            timerMinutes = timerMinutes
                         )
 
                         missionsByDate = missionsByDate +
@@ -252,12 +272,22 @@ fun LifeApp() {
                             (tomorrow.toString() to tomorrowMissions.filterNot { it.id == id })
                     },
 
-                    onEditTomorrowMission = { id, title, detail, rewardXp, rewardCoins, icon ->
+                    onEditTomorrowMission = { id, title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
                         missionsByDate = missionsByDate +
                             (tomorrow.toString() to tomorrowMissions.map { mission ->
                                 if (mission.id == id) mission.copy(title = title, detail = detail,
-                                    xp = rewardXp, coins = rewardCoins, icon = icon) else mission
+                                    xp = rewardXp, coins = rewardCoins, icon = icon,
+                                    validation = validation, photoMode = photoMode,
+                                    timerMinutes = timerMinutes) else mission
                             })
+                    },
+
+                    onPhotoSelected = { id, uri, before ->
+                        missionsByDate = missionsByDate + (today.toString() to todayMissions.map { mission ->
+                            if (mission.id == id) {
+                                if (before) mission.copy(beforePhotoUri = uri) else mission.copy(afterPhotoUri = uri)
+                            } else mission
+                        })
                     },
 
                     onComplete = { id ->
@@ -354,9 +384,10 @@ fun HomeScreen(
     activePet: Pet?,
     petStage: Int,
     petXp: Int,
-    onAddMission: (String, String, Int, Int, String) -> Unit,
+    onAddMission: (String, String, Int, Int, String, String, String, Int) -> Unit,
     onDeleteTomorrowMission: (Int) -> Unit,
-    onEditTomorrowMission: (Int, String, String, Int, Int, String) -> Unit,
+    onEditTomorrowMission: (Int, String, String, Int, Int, String, String, String, Int) -> Unit,
+    onPhotoSelected: (Int, String, Boolean) -> Unit,
     onComplete: (Int) -> Unit
 ) {
 
@@ -472,9 +503,14 @@ fun HomeScreen(
         }
 
         items(missions, key = { it.id }) { mission ->
-            MissionCard(mission) {
-                onComplete(mission.id)
-            }
+            MissionCard(mission,
+                onComplete = { onComplete(mission.id) },
+                onPhotoSelected = { uri, before ->
+                    val otherPhotoExists = if (before) mission.afterPhotoUri != null else mission.beforePhotoUri != null
+                    onPhotoSelected(mission.id, uri, before)
+                    if (mission.photoMode == "single" || otherPhotoExists) onComplete(mission.id)
+                }
+            )
         }
 
         item {
@@ -558,10 +594,10 @@ fun HomeScreen(
         AddMissionDialog(
             initialMission = editingMission,
             onDismiss = { showAddDialog = false; editingMission = null },
-            onSave = { title, detail, rewardXp, rewardCoins, icon ->
+            onSave = { title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
                 val current = editingMission
-                if (current == null) onAddMission(title, detail, rewardXp, rewardCoins, icon)
-                else onEditTomorrowMission(current.id, title, detail, rewardXp, rewardCoins, icon)
+                if (current == null) onAddMission(title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
+                else onEditTomorrowMission(current.id, title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
                 showAddDialog = false
                 editingMission = null
             }
@@ -593,128 +629,112 @@ fun HomeScreen(
 fun AddMissionDialog(
     initialMission: Mission? = null,
     onDismiss: () -> Unit,
-    onSave: (String, String, Int, Int, String) -> Unit
+    onSave: (String, String, Int, Int, String, String, String, Int) -> Unit
 ) {
     var title by remember(initialMission?.id) { mutableStateOf(initialMission?.title ?: "") }
     var detail by remember(initialMission?.id) { mutableStateOf(initialMission?.detail ?: "") }
     var xpText by remember(initialMission?.id) { mutableStateOf((initialMission?.xp ?: 50).toString()) }
     var coinsText by remember(initialMission?.id) { mutableStateOf((initialMission?.coins ?: 10).toString()) }
     var icon by remember(initialMission?.id) { mutableStateOf(initialMission?.icon ?: "⭐") }
+    var validation by remember(initialMission?.id) { mutableStateOf(initialMission?.validation ?: "manual") }
+    var photoMode by remember(initialMission?.id) { mutableStateOf(initialMission?.photoMode ?: "single") }
+    var timerText by remember(initialMission?.id) { mutableStateOf((initialMission?.timerMinutes ?: 30).toString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initialMission == null) "Nouvelle mission" else "Modifier la mission") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Nom de la mission") },
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = detail,
-                    onValueChange = { detail = it },
-                    label = { Text("Description (facultative)") },
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = icon,
-                    onValueChange = { icon = it },
-                    label = { Text("Emoji") },
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = xpText,
-                    onValueChange = { xpText = it.filter(Char::isDigit) },
-                    label = { Text("XP gagnés") },
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = coinsText,
-                    onValueChange = { coinsText = it.filter(Char::isDigit) },
-                    label = { Text("Pièces gagnées") },
-                    singleLine = true
-                )
+                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Nom de la mission") }, singleLine = true)
+                OutlinedTextField(value = detail, onValueChange = { detail = it }, label = { Text("Description (facultative)") }, singleLine = true)
+                OutlinedTextField(value = icon, onValueChange = { icon = it }, label = { Text("Emoji") }, singleLine = true)
+                OutlinedTextField(value = xpText, onValueChange = { xpText = it.filter(Char::isDigit) }, label = { Text("XP gagnés") }, singleLine = true)
+                OutlinedTextField(value = coinsText, onValueChange = { coinsText = it.filter(Char::isDigit) }, label = { Text("Pièces gagnées") }, singleLine = true)
+                Text("Comment valider cette mission ?", fontWeight = FontWeight.SemiBold, color = Ink)
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    TextButton(onClick = { validation = "manual" }) { Text(if (validation == "manual") "✓ Manuelle" else "Manuelle") }
+                    TextButton(onClick = { validation = "photo" }) { Text(if (validation == "photo") "✓ Photo" else "Photo") }
+                    TextButton(onClick = { validation = "timer" }) { Text(if (validation == "timer") "✓ Minuteur" else "Minuteur") }
+                }
+                if (validation == "photo") {
+                    Text("Type de photo", fontWeight = FontWeight.SemiBold, color = Ink)
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        TextButton(onClick = { photoMode = "single" }) { Text(if (photoMode == "single") "✓ Simple" else "Simple") }
+                        TextButton(onClick = { photoMode = "before_after" }) { Text(if (photoMode == "before_after") "✓ Avant / après" else "Avant / après") }
+                    }
+                }
+                if (validation == "timer") {
+                    OutlinedTextField(value = timerText, onValueChange = { timerText = it.filter(Char::isDigit).take(3) },
+                        label = { Text("Durée en minutes") }, singleLine = true)
+                }
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    val xpValue = xpText.toIntOrNull() ?: 50
-                    val coinValue = coinsText.toIntOrNull() ?: 10
-
-                    if (title.isNotBlank()) {
-                        onSave(
-                            title.trim(),
-                            detail.trim(),
-                            xpValue.coerceAtLeast(0),
-                            coinValue.coerceAtLeast(0),
-                            icon.ifBlank { "⭐" }
-                        )
-                    }
-                },
-                enabled = title.isNotBlank()
-            ) {
+            TextButton(onClick = {
+                if (title.isNotBlank()) onSave(title.trim(), detail.trim(),
+                    (xpText.toIntOrNull() ?: 50).coerceAtLeast(0),
+                    (coinsText.toIntOrNull() ?: 10).coerceAtLeast(0),
+                    icon.ifBlank { "⭐" }, validation, photoMode,
+                    (timerText.toIntOrNull() ?: 30).coerceIn(1, 240))
+            }, enabled = title.isNotBlank()) {
                 Text(if (initialMission == null) "Ajouter" else "Enregistrer", color = Pink)
             }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Annuler")
-            }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } }
     )
 }
 
 @Composable
-fun MissionCard(mission: Mission, onComplete: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = Color.White,
-        modifier = Modifier.fillMaxWidth()
-    ) {
+fun MissionCard(mission: Mission, onComplete: () -> Unit, onPhotoSelected: (String, Boolean) -> Unit) {
+    var photoStage by remember(mission.id) { mutableStateOf("single") }
+    var timerSeconds by remember(mission.id) { mutableIntStateOf(mission.timerMinutes * 60) }
+    var timerRunning by remember(mission.id) { mutableStateOf(false) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) onPhotoSelected(uri.toString(), photoStage == "before")
+    }
+    LaunchedEffect(timerRunning) {
+        while (timerRunning && timerSeconds > 0) { delay(1000); timerSeconds-- }
+        if (timerRunning && timerSeconds <= 0) { timerRunning = false; onComplete() }
+    }
+    Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = when (mission.id % 4) {
-                    0 -> Yellow.copy(alpha = .25f)
-                    1 -> Pink.copy(alpha = .18f)
-                    2 -> Blue.copy(alpha = .18f)
-                    else -> Orange.copy(alpha = .18f)
-                }
-            ) {
-                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                    Text(mission.icon, fontSize = 23.sp)
-                }
+            Surface(shape = RoundedCornerShape(14.dp), color = Pink.copy(alpha = .15f)) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { Text(mission.icon, fontSize = 23.sp) }
             }
-
             Spacer(Modifier.width(12.dp))
-
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(mission.title, fontWeight = FontWeight.Bold, color = Ink)
                 Text(mission.detail, color = Muted, fontSize = 11.sp)
                 Text("+${mission.xp} XP · +${mission.coins} pièces", color = Orange, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            }
-
-            if (mission.done) {
-                Icon(Icons.Default.CheckCircle, contentDescription = "Terminée", tint = Green)
-            } else {
-                FilledTonalButton(
-                    onClick = onComplete,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Pink.copy(alpha = .16f),
-                        contentColor = Ink
-                    )
-                ) {
-                    Text("Valider", fontSize = 11.sp)
+                if (mission.done) {
+                    Text("Mission terminée ✓", color = Green, fontSize = 12.sp)
+                } else when (mission.validation) {
+                    "photo" -> if (mission.photoMode == "single") {
+                        Text(if (mission.beforePhotoUri != null) "Photo ajoutée ✓" else "Ajoute une photo pour valider", color = Muted, fontSize = 11.sp)
+                        TextButton(onClick = { photoStage = "single"; photoPicker.launch("image/*") }) { Text("📷 Ajouter une photo") }
+                    } else {
+                        Text("Avant : ${if (mission.beforePhotoUri != null) "✓" else "à ajouter"}", color = Muted, fontSize = 11.sp)
+                        Text("Après : ${if (mission.afterPhotoUri != null) "✓" else "à ajouter"}", color = Muted, fontSize = 11.sp)
+                        Row {
+                            TextButton(onClick = { photoStage = "before"; photoPicker.launch("image/*") }) { Text("Photo avant") }
+                            TextButton(onClick = { photoStage = "after"; photoPicker.launch("image/*") }) { Text("Photo après") }
+                        }
+                    }
+                    "timer" -> {
+                        Text("Temps restant : %02d:%02d".format(timerSeconds / 60, timerSeconds % 60), color = Blue, fontSize = 12.sp)
+                        Row {
+                            TextButton(onClick = { timerRunning = !timerRunning }) { Text(if (timerRunning) "Pause" else "Démarrer") }
+                            TextButton(onClick = { timerRunning = false; timerSeconds = mission.timerMinutes * 60 }) { Text("Réinitialiser") }
+                        }
+                    }
+                    else -> FilledTonalButton(onClick = onComplete,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Pink.copy(alpha = .16f), contentColor = Ink)) {
+                        Text("Valider", fontSize = 11.sp)
+                    }
                 }
             }
+            if (mission.done) Icon(Icons.Default.CheckCircle, contentDescription = "Terminée", tint = Green)
         }
     }
 }
