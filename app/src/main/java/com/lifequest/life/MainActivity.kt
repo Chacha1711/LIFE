@@ -817,7 +817,7 @@ fun CollectionScreen(
     petXp: Int
 ) {
     Column(
-        Modifier.fillMaxSize().padding(padding).padding(20.dp),
+        Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Ta collection", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Ink)
