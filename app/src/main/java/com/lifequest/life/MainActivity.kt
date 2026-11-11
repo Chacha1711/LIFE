@@ -292,12 +292,13 @@ fun LifeApp() {
 
                     onComplete = { id ->
 
-                        val target = todayMissions.firstOrNull { it.id == id }
+                        val currentTodayMissions = missionsByDate[today.toString()] ?: emptyList()
+                        val target = currentTodayMissions.firstOrNull { it.id == id }
 
                         if (target != null && !target.done) {
 
                             missionsByDate = missionsByDate +
-                                (today.toString() to todayMissions.map {
+                                (today.toString() to currentTodayMissions.map {
                                     if (it.id == id) it.copy(done = true) else it
                                 })
 
