@@ -971,16 +971,29 @@ private fun hasUsageStatsAccess(context: Context): Boolean {
     ) == AppOpsManager.MODE_ALLOWED
 }
 
-private fun getTodayScreenTime(context: Context): Long {
+private data class ScreenTimeEntry(val date: LocalDate, val millis: Long)
+
+private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenTimeEntry> {
     val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-    val start = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
-    return manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, System.currentTimeMillis())
-        ?.sumOf { it.totalTimeInForeground } ?: 0L
+    val zone = java.time.ZoneId.systemDefault()
+    val today = LocalDate.now()
+    val firstDay = today.minusDays((days - 1).toLong())
+    val startMillis = firstDay.atStartOfDay(zone).toInstant().toEpochMilli()
+    val endMillis = System.currentTimeMillis()
+    val totals = manager.queryUsageStats(
+        UsageStatsManager.INTERVAL_DAILY,
+        startMillis,
+        endMillis
+    ).orEmpty()
+        .groupBy {
+            java.time.Instant.ofEpochMilli(it.beginTimeStamp).atZone(zone).toLocalDate()
+        }
+        .mapValues { (_, entries) -> entries.sumOf { it.totalTimeInForeground } }
+
+    return (0 until days).map { offset ->
+        val date = firstDay.plusDays(offset.toLong())
+        ScreenTimeEntry(date, totals[date] ?: 0L)
+    }
 }
 
 private fun formatScreenTime(milliseconds: Long): String {
@@ -1003,11 +1016,12 @@ fun ProfileScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var usageAccess by remember { mutableStateOf(hasUsageStatsAccess(context)) }
-    var screenTime by remember { mutableStateOf<Long?>(null) }
+    var history by remember { mutableStateOf<List<ScreenTimeEntry>?>(null) }
+    var historyDays by remember { mutableIntStateOf(7) }
 
     fun refreshScreenTime() {
         usageAccess = hasUsageStatsAccess(context)
-        screenTime = if (usageAccess) getTodayScreenTime(context) else null
+        history = if (usageAccess) getScreenTimeHistory(context, 30) else null
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -1018,6 +1032,19 @@ fun ProfileScreen(
         refreshScreenTime()
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+
+    val todayTime = history?.lastOrNull()?.millis
+    val visibleHistory = history?.takeLast(historyDays).orEmpty()
+    val maxTime = visibleHistory.maxOfOrNull { it.millis }?.coerceAtLeast(1L) ?: 1L
+    val lastWeek = history.orEmpty().filter {
+        !it.date.isBefore(LocalDate.now().minusDays(7)) && it.date.isBefore(LocalDate.now())
+    }
+    val previousWeek = history.orEmpty().filter {
+        !it.date.isBefore(LocalDate.now().minusDays(14)) && it.date.isBefore(LocalDate.now().minusDays(7))
+    }
+    val lastWeekAverage = if (lastWeek.isNotEmpty()) lastWeek.sumOf { it.millis } / lastWeek.size else 0L
+    val previousWeekAverage = if (previousWeek.isNotEmpty()) previousWeek.sumOf { it.millis } / previousWeek.size else 0L
+    val difference = lastWeekAverage - previousWeekAverage
 
     Column(
         Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp),
@@ -1039,8 +1066,8 @@ fun ProfileScreen(
                 StatLine("Compagnons terminés", "$petsCompleted / ${petCatalog.size}")
                 Divider(color = Cream)
                 Text("Temps d'écran aujourd'hui", fontWeight = FontWeight.Bold, color = Ink)
-                if (usageAccess && screenTime != null) {
-                    StatLine("Temps utilisé", formatScreenTime(screenTime!!))
+                if (usageAccess && todayTime != null) {
+                    StatLine("Temps utilisé", formatScreenTime(todayTime))
                     Text("Données fournies par Android. Elles peuvent avoir quelques minutes de décalage.", color = Muted, fontSize = 11.sp)
                 } else {
                     Text("Autorise LIFE à consulter les statistiques d'utilisation Android pour afficher ton temps d'écran.", color = Muted, fontSize = 12.sp)
@@ -1048,6 +1075,88 @@ fun ProfileScreen(
                         context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     }) {
                         Text("Autoriser l'accès au temps d'écran")
+                    }
+                }
+            }
+        }
+
+        if (usageAccess && history != null) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = Color.White,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Évolution de ton temps d'écran", fontWeight = FontWeight.Bold, color = Ink, fontSize = 17.sp)
+                    Text("Observe tes habitudes, jour après jour.", color = Muted, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = historyDays == 7,
+                            onClick = { historyDays = 7 },
+                            label = { Text("7 jours") }
+                        )
+                        FilterChip(
+                            selected = historyDays == 30,
+                            onClick = { historyDays = 30 },
+                            label = { Text("30 jours") }
+                        )
+                    }
+                    if (visibleHistory.all { it.millis == 0L }) {
+                        Text("Les statistiques ne sont pas encore disponibles. Réessaie un peu plus tard.", color = Muted, fontSize = 12.sp)
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().height(150.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            visibleHistory.forEach { entry ->
+                                Column(
+                                    Modifier.weight(1f).fillMaxHeight(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Bottom
+                                ) {
+                                    Text(
+                                        if (entry.millis > 0) formatScreenTime(entry.millis).replace(" min", "").replace(" h ", "h") else "0",
+                                        color = Muted,
+                                        fontSize = 9.sp,
+                                        maxLines = 1
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Box(
+                                        Modifier.weight(1f).fillMaxWidth(),
+                                        contentAlignment = Alignment.BottomCenter
+                                    ) {
+                                        Box(
+                                            Modifier.fillMaxWidth(0.62f)
+                                                .fillMaxHeight((entry.millis.toFloat() / maxTime.toFloat()).coerceIn(0.025f, 1f))
+                                                .background(Pink, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                                        )
+                                    }
+                                    Spacer(Modifier.height(5.dp))
+                                    Text(
+                                        entry.date.format(DateTimeFormatter.ofPattern(if (historyDays == 7) "EE" else "d", java.util.Locale.FRANCE)),
+                                        color = Muted,
+                                        fontSize = 9.sp
+                                    )
+                                }
+                            }
+                        }
+                        Divider(color = Cream)
+                        Text("Moyenne des 7 derniers jours complets", color = Muted, fontSize = 12.sp)
+                        StatLine("Cette semaine", formatScreenTime(lastWeekAverage))
+                        StatLine("Semaine précédente", formatScreenTime(previousWeekAverage))
+                        if (previousWeek.isNotEmpty() && lastWeek.isNotEmpty()) {
+                            val comparison = if (difference < 0) "en baisse de ${formatScreenTime(-difference)} par jour" else if (difference > 0) "en hausse de ${formatScreenTime(difference)} par jour" else "stable par rapport à la semaine précédente"
+                            Text(
+                                if (difference == 0L) "Ton temps d'écran est stable par rapport à la semaine précédente." else "Ta moyenne est $comparison.",
+                                color = if (difference <= 0) Green else Orange,
+                                fontSize = 12.sp
+                            )
+                        }
+                        val bestDay = history.orEmpty().filter { it.millis > 0 }.minByOrNull { it.millis }
+                        if (bestDay != null) {
+                            StatLine("Jour avec le moins d'écran", "${bestDay.date.format(DateTimeFormatter.ofPattern("dd/MM", java.util.Locale.FRANCE))} · ${formatScreenTime(bestDay.millis)}")
+                        }
                     }
                 }
             }
