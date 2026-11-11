@@ -1030,8 +1030,14 @@ fun FocusScreen(padding: PaddingValues, coins: Int) {
             ?.contains(context.packageName + "/" + FocusBlockingService::class.java.name) == true
     }
     val apps = remember {
+        val essentialPackages = setOf(
+            "com.android.settings", "com.android.phone", "com.android.server.telecom",
+            "com.android.emergency", "com.android.systemui", "com.google.android.dialer",
+            "com.samsung.android.dialer", "com.samsung.android.app.telephonyui"
+        )
         context.packageManager.getInstalledApplications(0)
-            .filter { it.packageName != context.packageName && context.packageManager.getLaunchIntentForPackage(it.packageName) != null }
+            .filter { it.packageName != context.packageName && it.packageName !in essentialPackages &&
+                context.packageManager.getLaunchIntentForPackage(it.packageName) != null }
             .map { it.packageName to context.packageManager.getApplicationLabel(it).toString() }
             .sortedBy { it.second.lowercase() }
     }
