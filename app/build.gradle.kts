@@ -8,7 +8,14 @@ plugins {
 android {
     namespace = "com.lifequest.life"
     compileSdk = 35
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
 
+    kotlinOptions {
+        jvmTarget = "17"
+    }
     defaultConfig {
         applicationId = "com.lifequest.life"
         minSdk = 26
