@@ -1015,3 +1015,103 @@ fun StatLine(label: String, value: String) {
     }
 }
 
+@Composable
+fun FocusScreen(padding: PaddingValues, coins: Int) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences("life_focus", Context.MODE_PRIVATE) }
+    var mode by remember { mutableStateOf(prefs.getString("mode", "all_day") ?: "all_day") }
+    var enabled by remember { mutableStateOf(prefs.getBoolean("enabled", false)) }
+    var selectedPackages by remember {
+        mutableStateOf(prefs.getStringSet("blockedPackages", emptySet())?.toSet() ?: emptySet())
+    }
+    val accessibilityEnabled = remember {
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            ?.contains(context.packageName + "/" + FocusBlockingService::class.java.name) == true
+    }
+    val apps = remember {
+        context.packageManager.getInstalledApplications(0)
+            .filter { it.packageName != context.packageName && context.packageManager.getLaunchIntentForPackage(it.packageName) != null }
+            .map { it.packageName to context.packageManager.getApplicationLabel(it).toString() }
+            .sortedBy { it.second.lowercase() }
+    }
+
+    fun saveFocus() {
+        prefs.edit().putString("mode", mode).putBoolean("enabled", enabled)
+            .putStringSet("blockedPackages", selectedPackages).apply()
+    }
+
+    Column(
+        Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("Mode concentration", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Text("Choisis les applications que tu veux mettre de côté.", color = Muted, fontSize = 13.sp)
+
+        Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Quand bloquer ?", fontWeight = FontWeight.Bold, color = Ink)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = mode == "all_day", onClick = {
+                        mode = "all_day"; saveFocus()
+                    })
+                    Column {
+                        Text("Toute la journée", color = Ink, fontWeight = FontWeight.SemiBold)
+                        Text("Une pause peut être obtenue avec tes pièces.", color = Muted, fontSize = 11.sp)
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = mode == "missions", onClick = {
+                        mode = "missions"; saveFocus()
+                    })
+                    Column {
+                        Text("Pendant mes missions", color = Ink, fontWeight = FontWeight.SemiBold)
+                        Text("Active le blocage au début d'une mission et coupe-le entre deux.", color = Muted, fontSize = 11.sp)
+                    }
+                }
+                Divider(color = Cream)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (mode == "all_day") "Blocage de la journée" else "Blocage de mission", fontWeight = FontWeight.Bold, color = Ink)
+                        Text(if (enabled) "Protection activée" else "Protection désactivée", color = Muted, fontSize = 11.sp)
+                    }
+                    Switch(checked = enabled, onCheckedChange = { enabled = it; saveFocus() })
+                }
+            }
+        }
+
+        Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Applications à bloquer", fontWeight = FontWeight.Bold, color = Ink)
+                Text("${selectedPackages.size} sélectionnée(s)", color = Muted, fontSize = 11.sp)
+                apps.forEach { (packageName, label) ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Checkbox(
+                            checked = packageName in selectedPackages,
+                            onCheckedChange = { checked ->
+                                selectedPackages = if (checked) selectedPackages + packageName else selectedPackages - packageName
+                                saveFocus()
+                            }
+                        )
+                        Text(label, color = Ink, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        Surface(shape = RoundedCornerShape(20.dp), color = Blue.copy(alpha = .13f), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Autorisation Android", fontWeight = FontWeight.Bold, color = Ink)
+                Text(
+                    if (accessibilityEnabled) "Le service LIFE semble activé sur ce téléphone."
+                    else "Pour détecter l'ouverture des applications choisies, Android doit autoriser le service LIFE.",
+                    color = Muted, fontSize = 12.sp
+                )
+                Button(onClick = {
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }) { Text("Ouvrir les paramètres d'accessibilité") }
+            }
+        }
+        Text("Tes appels, les réglages Android et les fonctions d'urgence ne sont pas bloqués. Pause : 20 pièces pour 15 minutes.", color = Muted, fontSize = 11.sp)
+    }
+}
+
