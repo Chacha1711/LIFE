@@ -5,7 +5,7 @@ import android.os.Bundle
 import android.content.Context
 import android.content.SharedPreferences
 import android.app.AppOpsManager
-import android.app.UsageStatsManager
+import android.app.usage.UsageStatsManager
 import android.os.Process
 import java.util.Calendar
 import androidx.lifecycle.Lifecycle
