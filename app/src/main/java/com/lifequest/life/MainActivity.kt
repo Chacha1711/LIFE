@@ -81,9 +81,9 @@ private val petCatalog = listOf(
 private fun loadMissions(prefs: SharedPreferences, today: LocalDate): Map<String, List<Mission>> {
     val saved = prefs.getString("missionsByDate", null)
     if (saved == null) return mapOf(today.toString() to listOf(
-        Mission(1, "Ranger ma chambre", "90 min · photo avant / après", 100, 20, "✨"),
+        Mission(1, "Ranger ma chambre", "90 min · photo avant / après", 100, 20, "✨", validation = "photo", photoMode = "before_after"),
         Mission(2, "Faire les courses", "Acheter les ingrédients", 30, 8, "🛍️"),
-        Mission(3, "Travailler les cours", "45 min · minuteur", 70, 14, "📚"),
+        Mission(3, "Travailler les cours", "45 min · minuteur", 70, 14, "📚", validation = "timer", timerMinutes = 45),
         Mission(4, "Atelier pâtisserie", "Gaufres et roses des sables", 50, 10, "🧁")
     ))
     return try {
