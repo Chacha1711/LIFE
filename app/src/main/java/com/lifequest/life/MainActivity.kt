@@ -4,6 +4,10 @@ package com.lifequest.life
 import android.os.Bundle
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.activity.ComponentActivity
@@ -40,6 +44,21 @@ private val Green = Color(0xFF69B88A)
 
 private const val XP_PER_EVOLUTION = 300
 
+
+private fun saveMissionPhoto(context: Context, uri: Uri): String? {
+    return try {
+        val directory = File(context.filesDir, "mission_photos")
+        if (!directory.exists()) directory.mkdirs()
+        val destination = File(directory, "${UUID.randomUUID()}.photo")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(destination).use { output -> input.copyTo(output) }
+        } ?: return null
+        destination.absolutePath
+    } catch (_: Exception) {
+        null
+    }
+}
+
 data class Mission(
     val id: Int,
     val title: String,
@@ -52,7 +71,9 @@ data class Mission(
     val photoMode: String = "single",
     val timerMinutes: Int = 30,
     val beforePhotoUri: String? = null,
-    val afterPhotoUri: String? = null
+    val afterPhotoUri: String? = null,
+    val timerRemainingSeconds: Int? = null,
+    val timerEndTimeMillis: Long? = null
 )
 
 data class Pet(
@@ -104,7 +125,9 @@ private fun loadMissions(prefs: SharedPreferences, today: LocalDate): Map<String
                     item.optString("photoMode", "single"),
                     item.optInt("timerMinutes", 30),
                     item.optString("beforePhotoUri").takeIf { it.isNotBlank() },
-                    item.optString("afterPhotoUri").takeIf { it.isNotBlank() }
+                    item.optString("afterPhotoUri").takeIf { it.isNotBlank() },
+                    if (item.has("timerRemainingSeconds") && !item.isNull("timerRemainingSeconds")) item.optInt("timerRemainingSeconds") else null,
+                    if (item.has("timerEndTimeMillis") && !item.isNull("timerEndTimeMillis")) item.optLong("timerEndTimeMillis") else null
                 ))
             }
             result[date] = list
@@ -124,7 +147,9 @@ private fun encodeMissions(data: Map<String, List<Mission>>): String {
                 .put("validation", m.validation).put("photoMode", m.photoMode)
                 .put("timerMinutes", m.timerMinutes)
                 .put("beforePhotoUri", m.beforePhotoUri ?: "")
-                .put("afterPhotoUri", m.afterPhotoUri ?: ""))
+                .put("afterPhotoUri", m.afterPhotoUri ?: "")
+                .put("timerRemainingSeconds", m.timerRemainingSeconds ?: JSONObject.NULL)
+                .put("timerEndTimeMillis", m.timerEndTimeMillis ?: JSONObject.NULL))
         }
         root.put(date, array)
     }
@@ -283,10 +308,18 @@ fun LifeApp() {
                     },
 
                     onPhotoSelected = { id, uri, before ->
-                        missionsByDate = missionsByDate + (today.toString() to todayMissions.map { mission ->
+                        val currentTodayMissions = missionsByDate[today.toString()] ?: emptyList()
+                        missionsByDate = missionsByDate + (today.toString() to currentTodayMissions.map { mission ->
                             if (mission.id == id) {
                                 if (before) mission.copy(beforePhotoUri = uri) else mission.copy(afterPhotoUri = uri)
                             } else mission
+                        })
+                    },
+
+                    onTimerStateChanged = { id, endTime, remaining ->
+                        val currentTodayMissions = missionsByDate[today.toString()] ?: emptyList()
+                        missionsByDate = missionsByDate + (today.toString() to currentTodayMissions.map { mission ->
+                            if (mission.id == id) mission.copy(timerEndTimeMillis = endTime, timerRemainingSeconds = remaining) else mission
                         })
                     },
 
@@ -389,6 +422,7 @@ fun HomeScreen(
     onDeleteTomorrowMission: (Int) -> Unit,
     onEditTomorrowMission: (Int, String, String, Int, Int, String, String, String, Int) -> Unit,
     onPhotoSelected: (Int, String, Boolean) -> Unit,
+    onTimerStateChanged: (Int, Long?, Int) -> Unit,
     onComplete: (Int) -> Unit
 ) {
 
@@ -506,6 +540,7 @@ fun HomeScreen(
         items(missions, key = { it.id }) { mission ->
             MissionCard(mission,
                 onComplete = { onComplete(mission.id) },
+                onTimerStateChanged = { endTime, remaining -> onTimerStateChanged(mission.id, endTime, remaining) },
                 onPhotoSelected = { uri, before ->
                     val otherPhotoExists = if (before) mission.afterPhotoUri != null else mission.beforePhotoUri != null
                     onPhotoSelected(mission.id, uri, before)
@@ -686,16 +721,31 @@ fun AddMissionDialog(
 }
 
 @Composable
-fun MissionCard(mission: Mission, onComplete: () -> Unit, onPhotoSelected: (String, Boolean) -> Unit) {
+fun MissionCard(mission: Mission, onComplete: () -> Unit, onPhotoSelected: (String, Boolean) -> Unit, onTimerStateChanged: (Long?, Int) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var photoStage by remember(mission.id) { mutableStateOf("single") }
-    var timerSeconds by remember(mission.id) { mutableIntStateOf(mission.timerMinutes * 60) }
-    var timerRunning by remember(mission.id) { mutableStateOf(false) }
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val timerEnd = mission.timerEndTimeMillis
+    val timerSeconds = if (timerEnd != null) ((timerEnd - nowMillis) / 1000L).toInt().coerceAtLeast(0)
+        else (mission.timerRemainingSeconds ?: (mission.timerMinutes * 60)).coerceAtLeast(0)
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) onPhotoSelected(uri.toString(), photoStage == "before")
+        if (uri != null) {
+            val savedPath = saveMissionPhoto(context, uri)
+            if (savedPath != null) onPhotoSelected(savedPath, photoStage == "before")
+        }
     }
-    LaunchedEffect(timerRunning) {
-        while (timerRunning && timerSeconds > 0) { delay(1000); timerSeconds-- }
-        if (timerRunning && timerSeconds <= 0) { timerRunning = false; onComplete() }
+    LaunchedEffect(timerEnd, mission.done) {
+        if (timerEnd != null && !mission.done) {
+            while (true) {
+                nowMillis = System.currentTimeMillis()
+                if (nowMillis >= timerEnd) {
+                    onTimerStateChanged(null, 0)
+                    onComplete()
+                    break
+                }
+                delay(250)
+            }
+        }
     }
     Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -724,8 +774,16 @@ fun MissionCard(mission: Mission, onComplete: () -> Unit, onPhotoSelected: (Stri
                     "timer" -> {
                         Text("Temps restant : %02d:%02d".format(timerSeconds / 60, timerSeconds % 60), color = Blue, fontSize = 12.sp)
                         Row {
-                            TextButton(onClick = { timerRunning = !timerRunning }) { Text(if (timerRunning) "Pause" else "Démarrer") }
-                            TextButton(onClick = { timerRunning = false; timerSeconds = mission.timerMinutes * 60 }) { Text("Réinitialiser") }
+                            TextButton(onClick = {
+                                val activeEnd = mission.timerEndTimeMillis
+                                if (activeEnd != null) {
+                                    val remaining = ((activeEnd - System.currentTimeMillis()) / 1000L).toInt().coerceAtLeast(0)
+                                    onTimerStateChanged(null, remaining)
+                                } else {
+                                    onTimerStateChanged(System.currentTimeMillis() + timerSeconds * 1000L, timerSeconds)
+                                }
+                            }) { Text(if (mission.timerEndTimeMillis != null) "Pause" else "Démarrer") }
+                            TextButton(onClick = { onTimerStateChanged(null, mission.timerMinutes * 60) }) { Text("Réinitialiser") }
                         }
                     }
                     else -> FilledTonalButton(onClick = onComplete,
