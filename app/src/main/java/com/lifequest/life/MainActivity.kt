@@ -5,6 +5,9 @@ import android.os.Bundle
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import android.content.Intent
+import android.provider.Settings
+import android.content.pm.ApplicationInfo
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -231,14 +234,16 @@ fun LifeApp() {
                         "Aujourd'hui",
                         "Collection",
                         "Récompenses",
-                        "Profil"
+                        "Profil",
+                        "Focus"
                     )
 
                     val icons = listOf(
                         Icons.Default.CheckCircle,
                         Icons.Default.Pets,
                         Icons.Default.CardGiftcard,
-                        Icons.Default.BarChart
+                        Icons.Default.BarChart,
+                        Icons.Default.Lock
                     )
 
                     labels.forEachIndexed { index, label ->
@@ -393,13 +398,18 @@ fun LifeApp() {
                     }
                 )
 
-                else -> ProfileScreen(
+                3 -> ProfileScreen(
                     padding,
                     xp,
                     coins,
                     todayMissions.count { it.done },
                     todayMissions.size,
                     completedPets.size
+                )
+
+                else -> FocusScreen(
+                    padding = padding,
+                    coins = coins
                 )
             }
         }
