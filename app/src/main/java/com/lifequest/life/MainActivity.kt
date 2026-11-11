@@ -7,7 +7,6 @@ import android.content.SharedPreferences
 import android.net.Uri
 import android.content.Intent
 import android.provider.Settings
-import android.content.pm.ApplicationInfo
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -19,6 +18,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
