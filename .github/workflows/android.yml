@@ -20,6 +20,9 @@ jobs:
 
       - name: Installer Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
 
       - name: Compiler LIFE
         run: gradle :application:assembleDebug
