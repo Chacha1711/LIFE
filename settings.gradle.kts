@@ -16,5 +16,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "LIFE"
-include(":applications")
-project(":applications").projectDir = file("applications")
+include(":app")
+
