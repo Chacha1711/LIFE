@@ -4,6 +4,12 @@ package com.lifequest.life
 import android.os.Bundle
 import android.content.Context
 import android.content.SharedPreferences
+import android.app.AppOpsManager
+import android.app.UsageStatsManager
+import android.os.Process
+import java.util.Calendar
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import android.net.Uri
 import android.content.Intent
 import android.provider.Settings
@@ -405,7 +411,8 @@ fun LifeApp() {
                     coins,
                     todayMissions.count { it.done },
                     todayMissions.size,
-                    completedPets.size
+                    completedPets.size,
+                    missionsByDate.values.flatten().count { it.done }
                 )
 
                 else -> FocusScreen(
@@ -955,6 +962,34 @@ fun RewardCard(
     }
 }
 
+private fun hasUsageStatsAccess(context: Context): Boolean {
+    val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+    return appOps.checkOpNoThrow(
+        AppOpsManager.OPSTR_GET_USAGE_STATS,
+        Process.myUid(),
+        context.packageName
+    ) == AppOpsManager.MODE_ALLOWED
+}
+
+private fun getTodayScreenTime(context: Context): Long {
+    val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+    val start = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    return manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, System.currentTimeMillis())
+        ?.sumOf { it.totalTimeInForeground } ?: 0L
+}
+
+private fun formatScreenTime(milliseconds: Long): String {
+    val minutes = (milliseconds / 60000L).toInt()
+    val hours = minutes / 60
+    val remainingMinutes = minutes % 60
+    return if (hours > 0) "${hours} h ${remainingMinutes} min" else "${remainingMinutes} min"
+}
+
 @Composable
 fun ProfileScreen(
     padding: PaddingValues,
@@ -962,10 +997,30 @@ fun ProfileScreen(
     coins: Int,
     completed: Int,
     total: Int,
-    petsCompleted: Int
+    petsCompleted: Int,
+    totalCompleted: Int
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var usageAccess by remember { mutableStateOf(hasUsageStatsAccess(context)) }
+    var screenTime by remember { mutableStateOf<Long?>(null) }
+
+    fun refreshScreenTime() {
+        usageAccess = hasUsageStatsAccess(context)
+        screenTime = if (usageAccess) getTodayScreenTime(context) else null
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshScreenTime()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        refreshScreenTime()
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     Column(
-        Modifier.fillMaxSize().padding(padding).padding(20.dp),
+        Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("Ton espace", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -975,12 +1030,26 @@ fun ProfileScreen(
             color = Color.White,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Tes statistiques", fontWeight = FontWeight.Bold, color = Ink)
                 StatLine("Expérience gagnée", "$xp XP")
                 StatLine("Pièces disponibles", "$coins")
                 StatLine("Missions terminées aujourd'hui", "$completed / $total")
+                StatLine("Missions terminées au total", "$totalCompleted")
                 StatLine("Compagnons terminés", "$petsCompleted / ${petCatalog.size}")
-                StatLine("Temps d'écran", "À connecter au mode concentration")
+                Divider(color = Cream)
+                Text("Temps d'écran aujourd'hui", fontWeight = FontWeight.Bold, color = Ink)
+                if (usageAccess && screenTime != null) {
+                    StatLine("Temps utilisé", formatScreenTime(screenTime!!))
+                    Text("Données fournies par Android. Elles peuvent avoir quelques minutes de décalage.", color = Muted, fontSize = 11.sp)
+                } else {
+                    Text("Autorise LIFE à consulter les statistiques d'utilisation Android pour afficher ton temps d'écran.", color = Muted, fontSize = 12.sp)
+                    Button(onClick = {
+                        context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }) {
+                        Text("Autoriser l'accès au temps d'écran")
+                    }
+                }
             }
         }
 
@@ -992,11 +1061,10 @@ fun ProfileScreen(
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Lock, contentDescription = null, tint = Blue)
                 Spacer(Modifier.width(10.dp))
-
                 Column {
                     Text("Mode concentration", fontWeight = FontWeight.Bold)
                     Text(
-                        "Le blocage Android sera ajouté dans une prochaine étape.",
+                        "Gère les applications à mettre en pause dans l'onglet Focus.",
                         color = Muted,
                         fontSize = 11.sp
                     )
