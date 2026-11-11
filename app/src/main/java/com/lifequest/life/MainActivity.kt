@@ -987,7 +987,7 @@ private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenT
         endMillis
     ).orEmpty()
         .groupBy {
-            java.time.Instant.ofEpochMilli(it.beginTimeStamp).atZone(zone).toLocalDate()
+            java.time.Instant.ofEpochMilli(it.lastTimeUsed).atZone(zone).toLocalDate()
         }
         .mapValues { (_, entries) -> entries.sumOf { it.totalTimeInForeground } }
 
