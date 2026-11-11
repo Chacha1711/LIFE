@@ -23,7 +23,7 @@ class FocusBlockingService : AccessibilityService() {
         val packageName = event?.packageName?.toString() ?: return
         val prefs = getSharedPreferences("life_focus", Context.MODE_PRIVATE)
         if (packageName == packageNameForOwnApp()) {
-            lastBlockedPackage = null
+            if (!prefs.getBoolean("blockScreenOpen", false)) lastBlockedPackage = null
             return
         }
         if (!prefs.getBoolean("enabled", false)) return
@@ -33,10 +33,14 @@ class FocusBlockingService : AccessibilityService() {
             return
         }
         val pauseUntil = prefs.getLong("breakUntil", 0L)
-        if (System.currentTimeMillis() < pauseUntil) return
+        if (System.currentTimeMillis() < pauseUntil) {
+            lastBlockedPackage = null
+            return
+        }
         if (lastBlockedPackage == packageName) return
 
         lastBlockedPackage = packageName
+        prefs.edit().putBoolean("blockScreenOpen", true).apply()
         val label = try {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
         } catch (_: Exception) { "Cette application" }
@@ -55,6 +59,11 @@ class FocusBlockingService : AccessibilityService() {
 }
 
 class FocusBlockActivity : ComponentActivity() {
+    override fun onDestroy() {
+        getSharedPreferences("life_focus", Context.MODE_PRIVATE).edit().putBoolean("blockScreenOpen", false).apply()
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         val blockedApp = intent.getStringExtra("blocked_app_name") ?: "Cette application"
