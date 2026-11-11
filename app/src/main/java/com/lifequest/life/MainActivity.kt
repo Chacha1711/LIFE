@@ -620,12 +620,10 @@ fun HomeScreen(
                 ) {
                     Text(mission.icon, fontSize = 24.sp)
                     Spacer(Modifier.width(10.dp))
-
                     Column(Modifier.weight(1f)) {
                         Text(mission.title, fontWeight = FontWeight.Bold, color = Ink)
                         Text("+${mission.xp} XP · +${mission.coins} pièces", color = Orange, fontSize = 11.sp)
                     }
-
                     IconButton(onClick = { editingMission = mission; showAddDialog = true }) {
                         Icon(Icons.Default.Edit, contentDescription = "Modifier", tint = Pink)
                     }
@@ -634,26 +632,26 @@ fun HomeScreen(
                     }
                 }
             }
-    item {
-        if (historyMissions.isNotEmpty()) {
-            Divider(color = Pink.copy(alpha = .25f))
-            Text("Historique", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Text("Retrouve les missions de tes journées précédentes.", color = Muted, fontSize = 12.sp)
         }
-    }
-    items(historyMissions, key = { "history_${it.first}" }) { entry ->
-        Surface(shape = RoundedCornerShape(16.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(dateLabel(LocalDate.parse(entry.first)), fontWeight = FontWeight.Bold, color = Ink)
-                Text("${entry.second.count { it.done }}/${entry.second.size} missions terminées", color = Muted, fontSize = 12.sp)
-                entry.second.forEach { oldMission ->
-                    Text("${if (oldMission.done) "✓" else "•"} ${oldMission.title}",
-                        color = if (oldMission.done) Green else Muted, fontSize = 12.sp)
-                }
+
+        item {
+            if (historyMissions.isNotEmpty()) {
+                Divider(color = Pink.copy(alpha = .25f))
+                Text("Historique", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("Retrouve les missions de tes journées précédentes.", color = Muted, fontSize = 12.sp)
             }
         }
-    }
-
+        items(historyMissions, key = { "history_${it.first}" }) { entry ->
+            Surface(shape = RoundedCornerShape(16.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(dateLabel(LocalDate.parse(entry.first)), fontWeight = FontWeight.Bold, color = Ink)
+                    Text("${entry.second.count { it.done }}/${entry.second.size} missions terminées", color = Muted, fontSize = 12.sp)
+                    entry.second.forEach { oldMission ->
+                        Text("${if (oldMission.done) "✓" else "•"} ${oldMission.title}",
+                            color = if (oldMission.done) Green else Muted, fontSize = 12.sp)
+                    }
+                }
+            }
         }
     }
 
