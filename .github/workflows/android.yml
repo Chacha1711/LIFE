@@ -25,7 +25,7 @@ jobs:
 
 
       - name: Compiler LIFE
-        run: gradle :application:assembleDebug
+        run: gradle :app:assembleDebug
 
       - name: Récupérer l'APK
         uses: actions/upload-artifact@v4
