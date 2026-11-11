@@ -2,6 +2,10 @@
 package com.lifequest.life
 
 import android.os.Bundle
+import android.content.Context
+import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -65,6 +69,54 @@ private val petCatalog = listOf(
     Pet("unicorn", "Licorne", listOf("🦄", "🦄🌸", "🦄🌈", "🦄👑"), "Une créature féerique.")
 )
 
+
+private fun loadMissions(prefs: SharedPreferences, today: LocalDate): Map<String, List<Mission>> {
+    val saved = prefs.getString("missionsByDate", null)
+    if (saved == null) return mapOf(today.toString() to listOf(
+        Mission(1, "Ranger ma chambre", "90 min · photo avant / après", 100, 20, "✨"),
+        Mission(2, "Faire les courses", "Acheter les ingrédients", 30, 8, "🛍️"),
+        Mission(3, "Travailler les cours", "45 min · minuteur", 70, 14, "📚"),
+        Mission(4, "Atelier pâtisserie", "Gaufres et roses des sables", 50, 10, "🧁")
+    ))
+    return try {
+        val root = JSONObject(saved)
+        val result = mutableMapOf<String, List<Mission>>()
+        val keys = root.keys()
+        while (keys.hasNext()) {
+            val date = keys.next()
+            val array = root.optJSONArray(date) ?: JSONArray()
+            val list = mutableListOf<Mission>()
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                list.add(Mission(
+                    item.optInt("id"), item.optString("title"), item.optString("detail"),
+                    item.optInt("xp"), item.optInt("coins"), item.optString("icon", "⭐"),
+                    item.optBoolean("done", false)
+                ))
+            }
+            result[date] = list
+        }
+        result
+    } catch (_: Exception) { emptyMap() }
+}
+
+private fun encodeMissions(data: Map<String, List<Mission>>): String {
+    val root = JSONObject()
+    data.forEach { (date, list) ->
+        val array = JSONArray()
+        list.forEach { m ->
+            array.put(JSONObject().put("id", m.id).put("title", m.title)
+                .put("detail", m.detail).put("xp", m.xp).put("coins", m.coins)
+                .put("icon", m.icon).put("done", m.done))
+        }
+        root.put(date, array)
+    }
+    return root.toString()
+}
+
+private fun loadSavedSet(prefs: SharedPreferences, key: String, default: Set<String>): Set<String> =
+    prefs.getStringSet(key, default)?.toSet() ?: default
+
 private fun dateLabel(date: LocalDate): String {
     return date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
 }
@@ -79,39 +131,41 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun LifeApp() {
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences("life_data", Context.MODE_PRIVATE) }
+
     var tab by remember { mutableIntStateOf(0) }
+    var xp by remember { mutableIntStateOf(prefs.getInt("xp", 120)) }
+    var coins by remember { mutableIntStateOf(prefs.getInt("coins", 45)) }
+    var petStage by remember { mutableIntStateOf(prefs.getInt("petStage", 0)) }
+    var petXp by remember { mutableIntStateOf(prefs.getInt("petXp", 0)) }
+    var activePetId by remember { mutableStateOf(prefs.getString("activePetId", "fox")) }
+    var unlockedPets by remember { mutableStateOf(loadSavedSet(prefs, "unlockedPets", setOf("fox"))) }
+    var completedPets by remember { mutableStateOf(loadSavedSet(prefs, "completedPets", emptySet())) }
 
-    var xp by remember { mutableIntStateOf(120) }
-    var coins by remember { mutableIntStateOf(45) }
+    val today = LocalDate.now()
+    val tomorrow = today.plusDays(1)
+    var nextMissionId by remember { mutableIntStateOf(prefs.getInt("nextMissionId", 5)) }
+    var missionsByDate by remember { mutableStateOf(loadMissions(prefs, today)) }
 
-    var petStage by remember { mutableIntStateOf(0) }
-    var petXp by remember { mutableIntStateOf(0) }
-
-    var activePetId by remember { mutableStateOf<String?>("fox") }
-
-    var unlockedPets by remember { mutableStateOf(setOf("fox")) }
-    var completedPets by remember { mutableStateOf(emptySet<String>()) }
-
-    val today = remember { LocalDate.now() }
-    val tomorrow = remember { today.plusDays(1) }
-
-    var nextMissionId by remember { mutableIntStateOf(5) }
-
-    var missionsByDate by remember {
-        mutableStateOf(
-            mapOf(
-                today.toString() to listOf(
-                    Mission(1, "Ranger ma chambre", "90 min · photo avant / après", 100, 20, "✨"),
-                    Mission(2, "Faire les courses", "Acheter les ingrédients", 30, 8, "🛍️"),
-                    Mission(3, "Travailler les cours", "45 min · minuteur", 70, 14, "📚"),
-                    Mission(4, "Atelier pâtisserie", "Gaufres et roses des sables", 50, 10, "🧁")
-                )
-            )
-        )
+    LaunchedEffect(xp, coins, petStage, petXp, activePetId, unlockedPets, completedPets, nextMissionId, missionsByDate) {
+        prefs.edit()
+            .putInt("xp", xp).putInt("coins", coins)
+            .putInt("petStage", petStage).putInt("petXp", petXp)
+            .putString("activePetId", activePetId)
+            .putStringSet("unlockedPets", unlockedPets)
+            .putStringSet("completedPets", completedPets)
+            .putInt("nextMissionId", nextMissionId)
+            .putString("missionsByDate", encodeMissions(missionsByDate))
+            .apply()
     }
 
     val todayMissions = missionsByDate[today.toString()] ?: emptyList()
     val tomorrowMissions = missionsByDate[tomorrow.toString()] ?: emptyList()
+    val historyMissions = missionsByDate.entries
+        .filter { it.key < today.toString() }
+        .sortedByDescending { it.key }
+        .map { it.key to it.value }
 
     val activePet = petCatalog.firstOrNull { it.id == activePetId }
 
@@ -170,6 +224,7 @@ fun LifeApp() {
                     coins = coins,
                     missions = todayMissions,
                     tomorrowMissions = tomorrowMissions,
+                    historyMissions = historyMissions,
                     tomorrow = tomorrow,
                     activePet = activePet,
                     petStage = petStage,
@@ -195,6 +250,14 @@ fun LifeApp() {
                     onDeleteTomorrowMission = { id ->
                         missionsByDate = missionsByDate +
                             (tomorrow.toString() to tomorrowMissions.filterNot { it.id == id })
+                    },
+
+                    onEditTomorrowMission = { id, title, detail, rewardXp, rewardCoins, icon ->
+                        missionsByDate = missionsByDate +
+                            (tomorrow.toString() to tomorrowMissions.map { mission ->
+                                if (mission.id == id) mission.copy(title = title, detail = detail,
+                                    xp = rewardXp, coins = rewardCoins, icon = icon) else mission
+                            })
                     },
 
                     onComplete = { id ->
@@ -286,16 +349,19 @@ fun HomeScreen(
     coins: Int,
     missions: List<Mission>,
     tomorrowMissions: List<Mission>,
+    historyMissions: List<Pair<String, List<Mission>>>,
     tomorrow: LocalDate,
     activePet: Pet?,
     petStage: Int,
     petXp: Int,
     onAddMission: (String, String, Int, Int, String) -> Unit,
     onDeleteTomorrowMission: (Int) -> Unit,
+    onEditTomorrowMission: (Int, String, String, Int, Int, String) -> Unit,
     onComplete: (Int) -> Unit
 ) {
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingMission by remember { mutableStateOf<Mission?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
@@ -477,6 +543,9 @@ fun HomeScreen(
                         Text("+${mission.xp} XP · +${mission.coins} pièces", color = Orange, fontSize = 11.sp)
                     }
 
+                    IconButton(onClick = { editingMission = mission; showAddDialog = true }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Modifier", tint = Pink)
+                    }
                     IconButton(onClick = { onDeleteTomorrowMission(mission.id) }) {
                         Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Muted)
                     }
@@ -487,29 +556,54 @@ fun HomeScreen(
 
     if (showAddDialog) {
         AddMissionDialog(
-            onDismiss = { showAddDialog = false },
+            initialMission = editingMission,
+            onDismiss = { showAddDialog = false; editingMission = null },
             onSave = { title, detail, rewardXp, rewardCoins, icon ->
-                onAddMission(title, detail, rewardXp, rewardCoins, icon)
+                val current = editingMission
+                if (current == null) onAddMission(title, detail, rewardXp, rewardCoins, icon)
+                else onEditTomorrowMission(current.id, title, detail, rewardXp, rewardCoins, icon)
                 showAddDialog = false
+                editingMission = null
             }
         )
+    }
+
+    item {
+        if (historyMissions.isNotEmpty()) {
+            Divider(color = Pink.copy(alpha = .25f))
+            Text("Historique", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Text("Retrouve les missions de tes journées précédentes.", color = Muted, fontSize = 12.sp)
+        }
+    }
+    items(historyMissions, key = { "history_${it.first}" }) { entry ->
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(dateLabel(LocalDate.parse(entry.first)), fontWeight = FontWeight.Bold, color = Ink)
+                Text("${entry.second.count { it.done }}/${entry.second.size} missions terminées", color = Muted, fontSize = 12.sp)
+                entry.second.forEach { oldMission ->
+                    Text("${if (oldMission.done) "✓" else "•"} ${oldMission.title}",
+                        color = if (oldMission.done) Green else Muted, fontSize = 12.sp)
+                }
+            }
+        }
     }
 }
 
 @Composable
 fun AddMissionDialog(
+    initialMission: Mission? = null,
     onDismiss: () -> Unit,
     onSave: (String, String, Int, Int, String) -> Unit
 ) {
-    var title by remember { mutableStateOf("") }
-    var detail by remember { mutableStateOf("") }
-    var xpText by remember { mutableStateOf("50") }
-    var coinsText by remember { mutableStateOf("10") }
-    var icon by remember { mutableStateOf("⭐") }
+    var title by remember(initialMission?.id) { mutableStateOf(initialMission?.title ?: "") }
+    var detail by remember(initialMission?.id) { mutableStateOf(initialMission?.detail ?: "") }
+    var xpText by remember(initialMission?.id) { mutableStateOf((initialMission?.xp ?: 50).toString()) }
+    var coinsText by remember(initialMission?.id) { mutableStateOf((initialMission?.coins ?: 10).toString()) }
+    var icon by remember(initialMission?.id) { mutableStateOf(initialMission?.icon ?: "⭐") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Nouvelle mission") },
+        title = { Text(if (initialMission == null) "Nouvelle mission" else "Modifier la mission") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -566,7 +660,7 @@ fun AddMissionDialog(
                 },
                 enabled = title.isNotBlank()
             ) {
-                Text("Ajouter", color = Pink)
+                Text(if (initialMission == null) "Ajouter" else "Enregistrer", color = Pink)
             }
         },
         dismissButton = {
@@ -727,17 +821,9 @@ fun RewardsScreen(
         Text("Tes récompenses", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Ink)
         Text("Tu as $coins pièces à dépenser.", color = Muted)
 
-        RewardCard("Pause détente", "15 minutes de pause téléphone", "☕", 20) {
-            onSpend(20)
-        }
-
-        RewardCard("Pause bonus", "30 minutes de pause téléphone", "🎧", 35) {
-            onSpend(35)
-        }
-
-        RewardCard("Accessoire animal", "Un accessoire pour ton compagnon", "🎀", 25) {
-            onSpend(25)
-        }
+        RewardCard("Pause détente", "15 minutes de pause téléphone", "☕", 20, canAfford = coins >= 20) { onSpend(20) }
+        RewardCard("Pause bonus", "30 minutes de pause téléphone", "🎧", 35, canAfford = coins >= 35) { onSpend(35) }
+        RewardCard("Accessoire animal", "Un accessoire pour ton compagnon", "🎀", 25, canAfford = coins >= 25) { onSpend(25) }
 
         Text(
             "Les pauses téléphone seront connectées au futur mode de concentration.",
@@ -753,6 +839,7 @@ fun RewardCard(
     detail: String,
     emoji: String,
     cost: Int,
+    canAfford: Boolean,
     onBuy: () -> Unit
 ) {
     Surface(
@@ -772,7 +859,7 @@ fun RewardCard(
 
             TextButton(
                 onClick = onBuy,
-                enabled = cost <= 100000
+                enabled = canAfford
             ) {
                 Text("Obtenir")
             }
