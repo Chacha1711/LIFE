@@ -634,23 +634,6 @@ fun HomeScreen(
                     }
                 }
             }
-        }
-    }
-
-    if (showAddDialog) {
-        AddMissionDialog(
-            initialMission = editingMission,
-            onDismiss = { showAddDialog = false; editingMission = null },
-            onSave = { title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
-                val current = editingMission
-                if (current == null) onAddMission(title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
-                else onEditTomorrowMission(current.id, title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
-                showAddDialog = false
-                editingMission = null
-            }
-        )
-    }
-
     item {
         if (historyMissions.isNotEmpty()) {
             Divider(color = Pink.copy(alpha = .25f))
@@ -669,6 +652,23 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+        }
+    }
+
+    if (showAddDialog) {
+        AddMissionDialog(
+            initialMission = editingMission,
+            onDismiss = { showAddDialog = false; editingMission = null },
+            onSave = { title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
+                val current = editingMission
+                if (current == null) onAddMission(title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
+                else onEditTomorrowMission(current.id, title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
+                showAddDialog = false
+                editingMission = null
+            }
+        )
     }
 }
 
