@@ -91,6 +91,8 @@ class FocusBlockActivity : ComponentActivity() {
                                     prefs.edit().putInt("coins", coins - 20).apply()
                                     focusPrefs.edit().putLong("breakUntil", System.currentTimeMillis() + 15 * 60 * 1000L).apply()
                                     message = "Pause activée pendant 15 minutes."
+                                    startActivity(Intent(this@FocusBlockActivity, MainActivity::class.java)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
                                     finish()
                                 } else {
                                     message = "Il te faut 20 pièces pour obtenir cette pause."
