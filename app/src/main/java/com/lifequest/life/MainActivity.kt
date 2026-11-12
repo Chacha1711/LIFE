@@ -415,7 +415,8 @@ fun LifeApp() {
                     completedPets,
                     activePetId,
                     petStage,
-                    petXp
+                    petXp,
+                    equippedAccessory
                 )
 
                 2 -> RewardsScreen(
@@ -905,7 +906,8 @@ fun CollectionScreen(
     completedPets: Set<String>,
     activePetId: String?,
     petStage: Int,
-    petXp: Int
+    petXp: Int,
+    equippedAccessory: String
 ) {
     Column(
         Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp),
@@ -939,8 +941,11 @@ fun CollectionScreen(
                         Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
                             Text(
                                 if (isUnlocked) pet.evolutions[stage] else "🔒",
-                                fontSize = 32.sp
+                                fontSize = if (isActive) listOf(32, 39, 47, 55)[stage.coerceIn(0, 3)].sp else 32.sp
                             )
+                            if (isActive && equippedAccessory.isNotBlank()) {
+                                Text(equippedAccessory, fontSize = 18.sp)
+                            }
                         }
                     }
 
@@ -1109,60 +1114,17 @@ private data class ScreenTimeEntry(val date: LocalDate, val millis: Long)
 private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenTimeEntry> {
     val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
     val zone = java.time.ZoneId.systemDefault()
-    val today = LocalDate.now()
-    val firstDay = today.minusDays((days - 1).toLong())
-    val startMillis = firstDay.atStartOfDay(zone).toInstant().toEpochMilli()
-    val endMillis = System.currentTimeMillis()
-    val totals = mutableMapOf<LocalDate, Long>()
-    val foregroundStarts = mutableMapOf<String, Long>()
-    val events = manager.queryEvents(startMillis, endMillis)
-    val event = android.app.usage.UsageEvents.Event()
-    while (events.hasNextEvent()) {
-        events.getNextEvent(event)
-        val pkg = event.packageName ?: continue
-        val timestamp: Long = event.timeStamp?.toLong() ?: continue
-        if (pkg == context.packageName) continue
-        val resumed = event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
-            event.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND
-        val paused = event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED ||
-            event.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_BACKGROUND
-        if (resumed) {
-            foregroundStarts[pkg] = timestamp
-        } else if (paused) {
-            val started: Long = foregroundStarts.remove(pkg) ?: continue
-            if (timestamp > started) {
-                var cursor: Long = started
-                while (cursor < timestamp) {
-                    val date = java.time.Instant.ofEpochMilli(cursor).atZone(zone).toLocalDate()
-                    val nextDay = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-                    val segmentEnd: Long = minOf(timestamp, nextDay)
-                    totals[date] = (totals[date] ?: 0L) + (segmentEnd - cursor)
-                    cursor = segmentEnd
-                }
-            }
-        }
-    }
-    foregroundStarts.forEach { (_, started) ->
-        var cursor = started
-        while (cursor < endMillis) {
-            val date = java.time.Instant.ofEpochMilli(cursor).atZone(zone).toLocalDate()
-            val nextDay = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-            val segmentEnd = minOf(endMillis, nextDay)
-            totals[date] = (totals[date] ?: 0L) + (segmentEnd - cursor)
-            cursor = segmentEnd
-        }
-    }
-    if (totals.values.none { it > 0L }) {
-        manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startMillis, endMillis)
-            .orEmpty()
-            .forEach { stat ->
-                val date = java.time.Instant.ofEpochMilli(stat.lastTimeUsed).atZone(zone).toLocalDate()
-                totals[date] = (totals[date] ?: 0L) + stat.totalTimeInForeground
-            }
-    }
+    val today = LocalDate.now(zone)
     return (0 until days).map { offset ->
-        val date = firstDay.plusDays(offset.toLong())
-        ScreenTimeEntry(date, totals[date] ?: 0L)
+        val date = today.minusDays((days - 1 - offset).toLong())
+        val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = if (date == today) System.currentTimeMillis()
+            else date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val stats = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end).orEmpty()
+        val usageTotal = stats.asSequence()
+            .filter { it.packageName != context.packageName }
+            .sumOf { it.totalTimeInForeground.coerceAtLeast(0L) }
+        ScreenTimeEntry(date, usageTotal)
     }
 }
 
