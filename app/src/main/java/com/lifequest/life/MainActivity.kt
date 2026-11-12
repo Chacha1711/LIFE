@@ -23,6 +23,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.delay
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -478,6 +479,10 @@ fun HomeScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var editingMission by remember { mutableStateOf<Mission?>(null) }
     var editingToday by remember { mutableStateOf(false) }
+    val petSize by animateFloatAsState(
+        targetValue = listOf(44f, 56f, 70f, 84f)[petStage.coerceIn(0, 3)],
+        label = "pet-growth"
+    )
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
@@ -535,12 +540,11 @@ fun HomeScreen(
                             )
                         }
 
-                        Text(
-                            (activePet?.evolutions?.get(petStage) ?: "🏆"),
-                            fontSize = listOf(42, 54, 68, 82)[petStage.coerceIn(0, 3)].sp
-                        )
-                        if (equippedAccessory.isNotBlank()) {
-                            Text(equippedAccessory, fontSize = 27.sp, modifier = Modifier.padding(start = 3.dp))
+                        Box(Modifier.size(112.dp), contentAlignment = Alignment.Center) {
+                            Text(activePet?.evolutions?.get(petStage) ?: "🏆", fontSize = petSize.sp)
+                            if (equippedAccessory.isNotBlank()) {
+                                Text(equippedAccessory, fontSize = 27.sp, modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp))
+                            }
                         }
                     }
 
@@ -944,7 +948,7 @@ fun CollectionScreen(
                                 fontSize = if (isActive) listOf(32, 39, 47, 55)[stage.coerceIn(0, 3)].sp else 32.sp
                             )
                             if (isActive && equippedAccessory.isNotBlank()) {
-                                Text(equippedAccessory, fontSize = 18.sp)
+                                Text(equippedAccessory, fontSize = 18.sp, modifier = Modifier.align(Alignment.TopEnd).padding(2.dp))
                             }
                         }
                     }
@@ -1200,7 +1204,11 @@ fun ProfileScreen(
                 Text("Temps d'écran aujourd'hui", fontWeight = FontWeight.Bold, color = Ink)
                 if (usageAccess && todayTime != null) {
                     StatLine("Temps utilisé", formatScreenTime(todayTime))
-                    Text("Données fournies par Android. Elles peuvent avoir quelques minutes de décalage.", color = Muted, fontSize = 11.sp)
+                    Text(
+                        if (todayTime > 0L) "Données d'utilisation Android, actualisées à l'ouverture de cette page."
+                        else "Android ne renvoie encore aucune durée pour aujourd'hui. Vérifie que l'accès aux données d'utilisation est bien autorisé pour LIFE dans les paramètres Samsung.",
+                        color = if (todayTime > 0L) Muted else Orange, fontSize = 11.sp
+                    )
                 } else {
                     Text("Autorise LIFE à consulter les statistiques d'utilisation Android pour afficher ton temps d'écran.", color = Muted, fontSize = 12.sp)
                     Button(onClick = {
