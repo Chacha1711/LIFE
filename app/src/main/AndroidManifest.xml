@@ -4,6 +4,7 @@
     <application
         android:allowBackup="true"
         android:label="LIFE"
+        android:icon="@drawable/ic_life_launcher"
         android:theme="@style/Theme.Life"
         android:supportsRtl="true">
         <activity
