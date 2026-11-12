@@ -192,6 +192,9 @@ fun LifeApp() {
     var activePetId by remember { mutableStateOf(prefs.getString("activePetId", "fox")) }
     var unlockedPets by remember { mutableStateOf(loadSavedSet(prefs, "unlockedPets", setOf("fox"))) }
     var completedPets by remember { mutableStateOf(loadSavedSet(prefs, "completedPets", emptySet())) }
+    var equippedAccessory by remember(activePetId) {
+        mutableStateOf(activePetId?.let { prefs.getString("equippedAccessory_$it", "") } ?: "")
+    }
 
     val today = LocalDate.now()
     val tomorrow = today.plusDays(1)
@@ -281,6 +284,7 @@ fun LifeApp() {
                     activePet = activePet,
                     petStage = petStage,
                     petXp = petXp,
+                    equippedAccessory = equippedAccessory,
 
                     onAddMission = { title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
 
@@ -298,8 +302,27 @@ fun LifeApp() {
 
                         missionsByDate = missionsByDate +
                             (tomorrow.toString() to (tomorrowMissions + newMission))
-
                         nextMissionId++
+                    },
+                    onAddTodayMission = { title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
+                        val current = missionsByDate[today.toString()] ?: emptyList()
+                        missionsByDate = missionsByDate + (today.toString() to (current + Mission(
+                            nextMissionId, title, detail, rewardXp, rewardCoins, icon,
+                            validation = validation, photoMode = photoMode, timerMinutes = timerMinutes
+                        )))
+                        nextMissionId++
+                    },
+                    onEditTodayMission = { id, title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
+                        val current = missionsByDate[today.toString()] ?: emptyList()
+                        missionsByDate = missionsByDate + (today.toString() to current.map { mission ->
+                            if (mission.id == id) mission.copy(title = title, detail = detail, xp = rewardXp,
+                                coins = rewardCoins, icon = icon, validation = validation, photoMode = photoMode,
+                                timerMinutes = timerMinutes) else mission
+                        })
+                    },
+                    onDeleteTodayMission = { id ->
+                        val current = missionsByDate[today.toString()] ?: emptyList()
+                        missionsByDate = missionsByDate + (today.toString() to current.filterNot { it.id == id })
                     },
 
                     onDeleteTomorrowMission = { id ->
@@ -396,8 +419,14 @@ fun LifeApp() {
                 )
 
                 2 -> RewardsScreen(
-                    padding,
-                    coins,
+                    padding = padding,
+                    coins = coins,
+                    activePetId = activePetId,
+                    equippedAccessory = equippedAccessory,
+                    onEquipAccessory = { emoji ->
+                        equippedAccessory = emoji
+                        activePetId?.let { prefs.edit().putString("equippedAccessory_$it", emoji).apply() }
+                    },
                     onSpend = { cost ->
                         if (coins >= cost) coins -= cost
                     }
@@ -434,18 +463,20 @@ fun HomeScreen(
     activePet: Pet?,
     petStage: Int,
     petXp: Int,
+    equippedAccessory: String,
     onAddMission: (String, String, Int, Int, String, String, String, Int) -> Unit,
     onDeleteTomorrowMission: (Int) -> Unit,
     onEditTomorrowMission: (Int, String, String, Int, Int, String, String, String, Int) -> Unit,
+    onAddTodayMission: (String, String, Int, Int, String, String, String, Int) -> Unit,
+    onEditTodayMission: (Int, String, String, Int, Int, String, String, String, Int) -> Unit,
+    onDeleteTodayMission: (Int) -> Unit,
     onPhotoSelected: (Int, String, Boolean) -> Unit,
     onTimerStateChanged: (Int, Long?, Int) -> Unit,
     onComplete: (Int) -> Unit
  ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val equippedAccessory = remember { context.getSharedPreferences("life_data", Context.MODE_PRIVATE).getString("equippedAccessory", "") ?: "" }
-
     var showAddDialog by remember { mutableStateOf(false) }
     var editingMission by remember { mutableStateOf<Mission?>(null) }
+    var editingToday by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
@@ -504,9 +535,12 @@ fun HomeScreen(
                         }
 
                         Text(
-                            (activePet?.evolutions?.get(petStage) ?: "🏆") + equippedAccessory,
-                            fontSize = 48.sp
+                            (activePet?.evolutions?.get(petStage) ?: "🏆"),
+                            fontSize = listOf(42, 54, 68, 82)[petStage.coerceIn(0, 3)].sp
                         )
+                        if (equippedAccessory.isNotBlank()) {
+                            Text(equippedAccessory, fontSize = 27.sp, modifier = Modifier.padding(start = 3.dp))
+                        }
                     }
 
                     if (activePet != null) {
@@ -537,8 +571,16 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Tes missions", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = Ink)
-                Text("${missions.count { it.done }}/${missions.size}", color = Muted, fontWeight = FontWeight.SemiBold)
+                Column {
+                    Text("Tes missions", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text("Pour aujourd'hui", color = Muted, fontSize = 12.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${missions.count { it.done }}/${missions.size}", color = Muted, fontWeight = FontWeight.SemiBold)
+                    IconButton(onClick = { editingMission = null; editingToday = true; showAddDialog = true }) {
+                        Icon(Icons.Default.AddCircle, contentDescription = "Ajouter une mission aujourd'hui", tint = Pink)
+                    }
+                }
             }
         }
 
@@ -555,7 +597,8 @@ fun HomeScreen(
             }
         }
 
-        items(missions, key = { it.id }) { mission ->
+        items(missions, key = { "today_${it.id}" }) { mission ->
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
             MissionCard(mission,
                 onComplete = { onComplete(mission.id) },
                 onTimerStateChanged = { endTime, remaining -> onTimerStateChanged(mission.id, endTime, remaining) },
@@ -565,6 +608,17 @@ fun HomeScreen(
                     if (mission.photoMode == "single" || otherPhotoExists) onComplete(mission.id)
                 }
             )
+            if (!mission.done) {
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { editingMission = mission; editingToday = true; showAddDialog = true }) {
+                        Text("Modifier", color = Pink)
+                    }
+                    TextButton(onClick = { onDeleteTodayMission(mission.id) }) {
+                        Text("Supprimer", color = Muted)
+                    }
+                }
+            }
+            }
         }
 
         item {
@@ -601,13 +655,13 @@ fun HomeScreen(
             )
 
             Button(
-                onClick = { showAddDialog = true },
+                onClick = { editingMission = null; editingToday = false; showAddDialog = true },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Pink)
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
-                Text("Ajouter une mission")
+                Text("Préparer une mission pour demain")
             }
 
             if (tomorrowMissions.isEmpty()) {
@@ -665,13 +719,19 @@ fun HomeScreen(
     if (showAddDialog) {
         AddMissionDialog(
             initialMission = editingMission,
-            onDismiss = { showAddDialog = false; editingMission = null },
+            onDismiss = { showAddDialog = false; editingMission = null; editingToday = false },
             onSave = { title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes ->
                 val current = editingMission
-                if (current == null) onAddMission(title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
-                else onEditTomorrowMission(current.id, title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
+                if (current == null) {
+                    if (editingToday) onAddTodayMission(title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
+                    else onAddMission(title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
+                } else {
+                    if (editingToday) onEditTodayMission(current.id, title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
+                    else onEditTomorrowMission(current.id, title, detail, rewardXp, rewardCoins, icon, validation, photoMode, timerMinutes)
+                }
                 showAddDialog = false
                 editingMission = null
+                editingToday = false
             }
         )
     }
