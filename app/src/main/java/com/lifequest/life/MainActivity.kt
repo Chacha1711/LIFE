@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.app.AppOpsManager
 import android.app.usage.UsageStatsManager
+import android.app.usage.UsageEvents
 import android.os.Process
 import java.util.Calendar
 import androidx.lifecycle.Lifecycle
