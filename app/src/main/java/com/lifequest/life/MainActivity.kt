@@ -112,12 +112,7 @@ private val petCatalog = listOf(
 
 private fun loadMissions(prefs: SharedPreferences, today: LocalDate): Map<String, List<Mission>> {
     val saved = prefs.getString("missionsByDate", null)
-    if (saved == null) return mapOf(today.toString() to listOf(
-        Mission(1, "Ranger ma chambre", "90 min · photo avant / après", 100, 20, "✨", validation = "photo", photoMode = "before_after"),
-        Mission(2, "Faire les courses", "Acheter les ingrédients", 30, 8, "🛍️"),
-        Mission(3, "Travailler les cours", "45 min · minuteur", 70, 14, "📚", validation = "timer", timerMinutes = 45),
-        Mission(4, "Atelier pâtisserie", "Gaufres et roses des sables", 50, 10, "🧁")
-    ))
+    if (saved == null) return emptyMap()
     return try {
         val root = JSONObject(saved)
         val result = mutableMapOf<String, List<Mission>>()
@@ -692,6 +687,7 @@ fun AddMissionDialog(
     var validation by remember(initialMission?.id) { mutableStateOf(initialMission?.validation ?: "manual") }
     var photoMode by remember(initialMission?.id) { mutableStateOf(initialMission?.photoMode ?: "single") }
     var timerText by remember(initialMission?.id) { mutableStateOf((initialMission?.timerMinutes ?: 30).toString()) }
+    var difficulty by remember(initialMission?.id) { mutableStateOf("Moyenne") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -701,8 +697,15 @@ fun AddMissionDialog(
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Nom de la mission") }, singleLine = true)
                 OutlinedTextField(value = detail, onValueChange = { detail = it }, label = { Text("Description (facultative)") }, singleLine = true)
                 OutlinedTextField(value = icon, onValueChange = { icon = it }, label = { Text("Emoji") }, singleLine = true)
-                OutlinedTextField(value = xpText, onValueChange = { xpText = it.filter(Char::isDigit) }, label = { Text("XP gagnés") }, singleLine = true)
-                OutlinedTextField(value = coinsText, onValueChange = { coinsText = it.filter(Char::isDigit) }, label = { Text("Pièces gagnées") }, singleLine = true)
+                OutlinedTextField(value = timerText, onValueChange = { timerText = it.filter(Char::isDigit).take(3) },
+                    label = { Text("Durée estimée en minutes") }, singleLine = true)
+                Text("Difficulté", fontWeight = FontWeight.SemiBold, color = Ink)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("Facile", "Moyenne", "Difficile").forEach { level ->
+                        FilterChip(selected = difficulty == level, onClick = { difficulty = level }, label = { Text(level) })
+                    }
+                }
+                Text("Les XP et les pièces seront calculés automatiquement.", color = Muted, fontSize = 11.sp)
                 Text("Comment valider cette mission ?", fontWeight = FontWeight.SemiBold, color = Ink)
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     TextButton(onClick = { validation = "manual" }) { Text(if (validation == "manual") "✓ Manuelle" else "Manuelle") }
@@ -716,19 +719,20 @@ fun AddMissionDialog(
                         TextButton(onClick = { photoMode = "before_after" }) { Text(if (photoMode == "before_after") "✓ Avant / après" else "Avant / après") }
                     }
                 }
-                if (validation == "timer") {
-                    OutlinedTextField(value = timerText, onValueChange = { timerText = it.filter(Char::isDigit).take(3) },
-                        label = { Text("Durée en minutes") }, singleLine = true)
-                }
+
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                if (title.isNotBlank()) onSave(title.trim(), detail.trim(),
-                    (xpText.toIntOrNull() ?: 50).coerceAtLeast(0),
-                    (coinsText.toIntOrNull() ?: 10).coerceAtLeast(0),
-                    icon.ifBlank { "⭐" }, validation, photoMode,
-                    (timerText.toIntOrNull() ?: 30).coerceIn(1, 240))
+                if (title.isNotBlank()) {
+                    val duration = (timerText.toIntOrNull() ?: 30).coerceIn(1, 240)
+                    val multiplier = when (difficulty) { "Facile" -> 0.75; "Difficile" -> 1.5; else -> 1.0 }
+                    val calculatedXp = (duration / 15.0 * 10.0 * multiplier).toInt().coerceIn(5, 200)
+                    val calculatedCoins = (calculatedXp / 5).coerceAtLeast(1)
+                    val rewardDetail = listOf(detail.trim(), "$"+"{duration} min · $"+"{difficulty}").filter { it.isNotBlank() }.joinToString(" · ")
+                    onSave(title.trim(), rewardDetail, calculatedXp, calculatedCoins,
+                        icon.ifBlank { "⭐" }, validation, photoMode, duration)
+                }
             }, enabled = title.isNotBlank()) {
                 Text(if (initialMission == null) "Ajouter" else "Enregistrer", color = Pink)
             }
@@ -914,18 +918,45 @@ fun RewardsScreen(
         Modifier.fillMaxSize().padding(padding).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val dataPrefs = remember { context.getSharedPreferences("life_data", Context.MODE_PRIVATE) }
+        val accessoryCatalog = listOf("🎀" to "Nœud", "👑" to "Couronne", "🕶️" to "Lunettes", "🌸" to "Fleur", "⭐" to "Étoile", "🧣" to "Écharpe")
+        var ownedAccessories by remember { mutableStateOf(dataPrefs.getStringSet("ownedAccessories", emptySet())?.toSet() ?: emptySet()) }
+        var equippedAccessory by remember { mutableStateOf(dataPrefs.getString("equippedAccessory", "") ?: "") }
         Text("Tes récompenses", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Ink)
         Text("Tu as $coins pièces à dépenser.", color = Muted)
-
         RewardCard("Pause détente", "15 minutes de pause téléphone", "☕", 20, canAfford = coins >= 20) { onSpend(20) }
         RewardCard("Pause bonus", "30 minutes de pause téléphone", "🎧", 35, canAfford = coins >= 35) { onSpend(35) }
-        RewardCard("Accessoire animal", "Un accessoire pour ton compagnon", "🎀", 25, canAfford = coins >= 25) { onSpend(25) }
-
-        Text(
-            "Les pauses téléphone seront connectées au futur mode de concentration.",
-            fontSize = 11.sp,
-            color = Muted
-        )
+        Text("Boutique d'accessoires", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Text("Achète un accessoire, puis équipe celui que tu préfères.", color = Muted, fontSize = 12.sp)
+        accessoryCatalog.forEach { (emoji, name) ->
+            val owned = emoji in ownedAccessories
+            Surface(shape = RoundedCornerShape(18.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(emoji, fontSize = 30.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(name, fontWeight = FontWeight.Bold, color = Ink)
+                        Text(if (equippedAccessory == emoji) "Équipé" else if (owned) "Dans ta collection" else "25 pièces", color = Muted, fontSize = 11.sp)
+                    }
+                    if (owned) {
+                        TextButton(onClick = {
+                            equippedAccessory = if (equippedAccessory == emoji) "" else emoji
+                            dataPrefs.edit().putString("equippedAccessory", equippedAccessory).apply()
+                        }) { Text(if (equippedAccessory == emoji) "Retirer" else "Équiper") }
+                    } else {
+                        TextButton(enabled = coins >= 25, onClick = {
+                            onSpend(25)
+                            ownedAccessories = ownedAccessories + emoji
+                            equippedAccessory = emoji
+                            dataPrefs.edit().putStringSet("ownedAccessories", ownedAccessories)
+                                .putString("equippedAccessory", equippedAccessory).apply()
+                        }) { Text("Acheter") }
+                    }
+                }
+            }
+        }
+        Text("Accessoire actuellement équipé : " + (equippedAccessory.ifBlank { "aucun" }), color = Muted, fontSize = 12.sp)
     }
 }
 
@@ -981,16 +1012,44 @@ private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenT
     val firstDay = today.minusDays((days - 1).toLong())
     val startMillis = firstDay.atStartOfDay(zone).toInstant().toEpochMilli()
     val endMillis = System.currentTimeMillis()
-    val totals = manager.queryUsageStats(
-        UsageStatsManager.INTERVAL_DAILY,
-        startMillis,
-        endMillis
-    ).orEmpty()
-        .groupBy {
-            java.time.Instant.ofEpochMilli(it.lastTimeUsed).atZone(zone).toLocalDate()
+    val totals = mutableMapOf<LocalDate, Long>()
+    val foregroundStarts = mutableMapOf<String, Long>()
+    val events = manager.queryEvents(startMillis, endMillis)
+    val event = android.app.usage.UsageEvents.Event()
+    while (events.hasNextEvent()) {
+        events.getNextEvent(event)
+        val pkg = event.packageName ?: continue
+        if (pkg == context.packageName) continue
+        val resumed = event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
+            event.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND
+        val paused = event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED ||
+            event.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_BACKGROUND
+        if (resumed) {
+            foregroundStarts[pkg] = event.timeStamp
+        } else if (paused) {
+            val started = foregroundStarts.remove(pkg)
+            if (started != null && event.timeStamp > started) {
+                var cursor = started
+                while (cursor < event.timeStamp) {
+                    val date = java.time.Instant.ofEpochMilli(cursor).atZone(zone).toLocalDate()
+                    val nextDay = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+                    val segmentEnd = minOf(event.timeStamp, nextDay)
+                    totals[date] = (totals[date] ?: 0L) + (segmentEnd - cursor)
+                    cursor = segmentEnd
+                }
+            }
         }
-        .mapValues { (_, entries) -> entries.sumOf { it.totalTimeInForeground } }
-
+    }
+    foregroundStarts.forEach { (_, started) ->
+        var cursor = started
+        while (cursor < endMillis) {
+            val date = java.time.Instant.ofEpochMilli(cursor).atZone(zone).toLocalDate()
+            val nextDay = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            val segmentEnd = minOf(endMillis, nextDay)
+            totals[date] = (totals[date] ?: 0L) + (segmentEnd - cursor)
+            cursor = segmentEnd
+        }
+    }
     return (0 until days).map { offset ->
         val date = firstDay.plusDays(offset.toLong())
         ScreenTimeEntry(date, totals[date] ?: 0L)
