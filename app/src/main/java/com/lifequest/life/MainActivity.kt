@@ -1124,10 +1124,42 @@ private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenT
         val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = if (date == today) System.currentTimeMillis()
             else date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val stats = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end).orEmpty()
-        val usageTotal = stats.asSequence()
-            .filter { it.packageName != context.packageName }
-            .sumOf { it.totalTimeInForeground.coerceAtLeast(0L) }
+
+        // On some Samsung devices, queryUsageStats can return zero even when
+        // Usage Access is granted. Querying the usage events is a more direct fallback.
+        var usageTotal = 0L
+        val foregroundStarts = mutableMapOf<String, Long>()
+        val events = manager.queryEvents(start, end)
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val pkg = event.packageName ?: continue
+            if (pkg == context.packageName) continue
+            val timestamp = event.timeStamp
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED,
+                UsageEvents.Event.MOVE_TO_FOREGROUND -> {
+                    if (!foregroundStarts.containsKey(pkg)) foregroundStarts[pkg] = timestamp
+                }
+                UsageEvents.Event.ACTIVITY_PAUSED,
+                UsageEvents.Event.ACTIVITY_STOPPED,
+                UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                    val openedAt = foregroundStarts.remove(pkg)
+                    if (openedAt != null && timestamp > openedAt) usageTotal += timestamp - openedAt
+                }
+            }
+        }
+        foregroundStarts.forEach { (_, openedAt) ->
+            if (end > openedAt) usageTotal += end - openedAt
+        }
+
+        // Keep the daily-summary API as a fallback if the event stream is empty.
+        if (usageTotal == 0L) {
+            usageTotal = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end).orEmpty()
+                .asSequence()
+                .filter { it.packageName != context.packageName }
+                .sumOf { it.totalTimeInForeground.coerceAtLeast(0L) }
+        }
         ScreenTimeEntry(date, usageTotal)
     }
 }
