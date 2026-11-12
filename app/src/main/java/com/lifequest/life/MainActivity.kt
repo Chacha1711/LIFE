@@ -1114,54 +1114,82 @@ private fun hasUsageStatsAccess(context: Context): Boolean {
     ) == AppOpsManager.MODE_ALLOWED
 }
 
-private data class ScreenTimeEntry(val date: LocalDate, val millis: Long)
+private data class ScreenTimeEntry(
+    val date: LocalDate,
+    val millis: Long,
+    val eventsRead: Int = 0,
+    val statsPackages: Int = 0
+)
 
 private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenTimeEntry> {
     val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
     val zone = java.time.ZoneId.systemDefault()
     val today = LocalDate.now(zone)
+
     return (0 until days).map { offset ->
         val date = today.minusDays((days - 1 - offset).toLong())
         val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = if (date == today) System.currentTimeMillis()
             else date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
-        // On some Samsung devices, queryUsageStats can return zero even when
-        // Usage Access is granted. Querying the usage events is a more direct fallback.
+        // Android emits foreground/background events as activities change.
+        // Track the foreground app globally so a missing PAUSED event does not
+        // leave several apps counted at the same time.
         var usageTotal = 0L
-        val foregroundStarts = mutableMapOf<String, Long>()
+        var eventsRead = 0
+        var foregroundPackage: String? = null
+        var foregroundStartedAt = 0L
         val events = manager.queryEvents(start, end)
         val event = UsageEvents.Event()
+
+        fun closeForeground(at: Long) {
+            val active = foregroundPackage
+            if (active != null && foregroundStartedAt > 0L && at > foregroundStartedAt) {
+                usageTotal += at - foregroundStartedAt
+            }
+            foregroundPackage = null
+            foregroundStartedAt = 0L
+        }
+
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            val pkg = event.packageName ?: continue
-            if (pkg == context.packageName) continue
+            eventsRead++
+            val pkg = event.packageName?.toString()
             val timestamp = event.timeStamp
+
             when (event.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED,
                 UsageEvents.Event.MOVE_TO_FOREGROUND -> {
-                    if (!foregroundStarts.containsKey(pkg)) foregroundStarts[pkg] = timestamp
+                    if (foregroundPackage != pkg) {
+                        closeForeground(timestamp)
+                        if (pkg != null && pkg != context.packageName) {
+                            foregroundPackage = pkg
+                            foregroundStartedAt = timestamp
+                        }
+                    }
                 }
                 UsageEvents.Event.ACTIVITY_PAUSED,
                 UsageEvents.Event.ACTIVITY_STOPPED,
                 UsageEvents.Event.MOVE_TO_BACKGROUND -> {
-                    val openedAt = foregroundStarts.remove(pkg)
-                    if (openedAt != null && timestamp > openedAt) usageTotal += timestamp - openedAt
+                    if (foregroundPackage == pkg) closeForeground(timestamp)
                 }
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> closeForeground(timestamp)
             }
         }
-        foregroundStarts.forEach { (_, openedAt) ->
-            if (end > openedAt) usageTotal += end - openedAt
-        }
+        closeForeground(end)
 
-        // Keep the daily-summary API as a fallback if the event stream is empty.
-        if (usageTotal == 0L) {
-            usageTotal = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end).orEmpty()
-                .asSequence()
-                .filter { it.packageName != context.packageName }
-                .sumOf { it.totalTimeInForeground.coerceAtLeast(0L) }
-        }
-        ScreenTimeEntry(date, usageTotal)
+        // Daily UsageStats is the fallback on Android versions/devices where
+        // the event stream is unavailable or incomplete.
+        val dailyStats = manager.queryUsageStats(
+            UsageStatsManager.INTERVAL_DAILY, start, end
+        ).orEmpty()
+        val statsPackages = dailyStats.count { it.packageName != context.packageName }
+        val summaryTotal = dailyStats.asSequence()
+            .filter { it.packageName != context.packageName }
+            .sumOf { it.totalTimeInForeground.coerceAtLeast(0L) }
+
+        if (summaryTotal > usageTotal) usageTotal = summaryTotal
+        ScreenTimeEntry(date, usageTotal, eventsRead, statsPackages)
     }
 }
 
@@ -1242,6 +1270,14 @@ fun ProfileScreen(
                         else "Android ne renvoie encore aucune durée pour aujourd'hui. Vérifie que l'accès aux données d'utilisation est bien autorisé pour LIFE dans les paramètres Samsung.",
                         color = if (todayTime > 0L) Muted else Orange, fontSize = 11.sp
                     )
+                    if (todayTime == 0L) {
+                        val todayEntry = history?.lastOrNull()
+                        Text(
+                            "Diagnostic LIFE : ${todayEntry?.eventsRead ?: 0} événements Android lus, ${todayEntry?.statsPackages ?: 0} applications trouvées.",
+                            color = Muted,
+                            fontSize = 10.sp
+                        )
+                    }
                 } else {
                     Text("Autorise LIFE à consulter les statistiques d'utilisation Android pour afficher ton temps d'écran.", color = Muted, fontSize = 12.sp)
                     Button(onClick = {
