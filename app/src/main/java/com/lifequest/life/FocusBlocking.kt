@@ -26,7 +26,13 @@ class FocusBlockingService : AccessibilityService() {
             if (!prefs.getBoolean("blockScreenOpen", false)) lastBlockedPackage = null
             return
         }
-        if (!prefs.getBoolean("enabled", false)) return
+        val mode = prefs.getString("mode", "all_day") ?: "all_day"
+        val shouldBlock = if (mode == "missions") {
+            prefs.getBoolean("missionActive", false)
+        } else {
+            prefs.getBoolean("enabled", false)
+        }
+        if (!shouldBlock) return
         val blocked = prefs.getStringSet("blockedPackages", emptySet()) ?: emptySet()
         if (packageName !in blocked) {
             lastBlockedPackage = null
