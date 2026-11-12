@@ -438,7 +438,9 @@ fun HomeScreen(
     onPhotoSelected: (Int, String, Boolean) -> Unit,
     onTimerStateChanged: (Int, Long?, Int) -> Unit,
     onComplete: (Int) -> Unit
-) {
+ ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val equippedAccessory = remember { context.getSharedPreferences("life_data", Context.MODE_PRIVATE).getString("equippedAccessory", "") ?: "" }
 
     var showAddDialog by remember { mutableStateOf(false) }
     var editingMission by remember { mutableStateOf<Mission?>(null) }
@@ -500,7 +502,7 @@ fun HomeScreen(
                         }
 
                         Text(
-                            activePet?.evolutions?.get(petStage) ?: "🏆",
+                            (activePet?.evolutions?.get(petStage) ?: "🏆") + equippedAccessory,
                             fontSize = 48.sp
                         )
                     }
@@ -745,11 +747,12 @@ fun AddMissionDialog(
 fun MissionCard(mission: Mission, onComplete: () -> Unit, onPhotoSelected: (String, Boolean) -> Unit, onTimerStateChanged: (Long?, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val focusPrefs = remember { context.getSharedPreferences("life_focus", Context.MODE_PRIVATE) }
-    var missionStarted by remember(mission.id) { mutableStateOf(false) }
+    var missionStarted by remember(mission.id) { mutableStateOf(focusPrefs.getInt("activeMissionId", -1) == mission.id) }
     var photoStage by remember(mission.id) { mutableStateOf("single") }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     fun setMissionFocus(active: Boolean) {
-        focusPrefs.edit().putBoolean("missionActive", active).apply()
+        focusPrefs.edit().putBoolean("missionActive", active)
+            .putInt("activeMissionId", if (active) mission.id else -1).apply()
         missionStarted = active
     }
     LaunchedEffect(mission.done) { if (mission.done) setMissionFocus(false) }
@@ -939,8 +942,16 @@ fun RewardsScreen(
         var equippedAccessory by remember { mutableStateOf(dataPrefs.getString("equippedAccessory", "") ?: "") }
         Text("Tes récompenses", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Ink)
         Text("Tu as $coins pièces à dépenser.", color = Muted)
-        RewardCard("Pause détente", "15 minutes de pause téléphone", "☕", 20, canAfford = coins >= 20) { onSpend(20) }
-        RewardCard("Pause bonus", "30 minutes de pause téléphone", "🎧", 35, canAfford = coins >= 35) { onSpend(35) }
+        RewardCard("Pause détente", "15 minutes de pause téléphone", "☕", 20, canAfford = coins >= 20) {
+            onSpend(20)
+            context.getSharedPreferences("life_focus", Context.MODE_PRIVATE).edit()
+                .putLong("breakUntil", System.currentTimeMillis() + 15 * 60 * 1000L).apply()
+        }
+        RewardCard("Pause bonus", "30 minutes de pause téléphone", "🎧", 35, canAfford = coins >= 35) {
+            onSpend(35)
+            context.getSharedPreferences("life_focus", Context.MODE_PRIVATE).edit()
+                .putLong("breakUntil", System.currentTimeMillis() + 30 * 60 * 1000L).apply()
+        }
         Text("Boutique d'accessoires", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink)
         Text("Achète un accessoire, puis équipe celui que tu préfères.", color = Muted, fontSize = 12.sp)
         accessoryCatalog.forEach { (emoji, name) ->
