@@ -1044,7 +1044,7 @@ private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenT
     while (events.hasNextEvent()) {
         events.getNextEvent(event)
         val pkg = event.packageName ?: continue
-        val timestamp = event.timeStamp ?: continue
+        val timestamp: Long = event.timeStamp?.toLong() ?: continue
         if (pkg == context.packageName) continue
         val resumed = event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ||
             event.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND
@@ -1053,13 +1053,13 @@ private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenT
         if (resumed) {
             foregroundStarts[pkg] = timestamp
         } else if (paused) {
-            val started = foregroundStarts.remove(pkg)
-            if (started != null && timestamp > started) {
-                var cursor = started
+            val started: Long = foregroundStarts.remove(pkg) ?: continue
+            if (timestamp > started) {
+                var cursor: Long = started
                 while (cursor < timestamp) {
                     val date = java.time.Instant.ofEpochMilli(cursor).atZone(zone).toLocalDate()
                     val nextDay = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-                    val segmentEnd = minOf(timestamp, nextDay)
+                    val segmentEnd: Long = minOf(timestamp, nextDay)
                     totals[date] = (totals[date] ?: 0L) + (segmentEnd - cursor)
                     cursor = segmentEnd
                 }
