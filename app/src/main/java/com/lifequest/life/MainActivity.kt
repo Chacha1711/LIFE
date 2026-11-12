@@ -123,8 +123,10 @@ private fun loadMissions(prefs: SharedPreferences, today: LocalDate): Map<String
             val list = mutableListOf<Mission>()
             for (i in 0 until array.length()) {
                 val item = array.optJSONObject(i) ?: continue
+                val savedTitle = item.optString("title")
+                if (savedTitle in setOf("Ranger ma chambre", "Faire les courses", "Travailler les cours", "Atelier pâtisserie", "Pâtisser")) continue
                 list.add(Mission(
-                    item.optInt("id"), item.optString("title"), item.optString("detail"),
+                    item.optInt("id"), savedTitle, item.optString("detail"),
                     item.optInt("xp"), item.optInt("coins"), item.optString("icon", "⭐"),
                     item.optBoolean("done", false),
                     item.optString("validation", "manual"),
@@ -1075,6 +1077,14 @@ private fun getScreenTimeHistory(context: Context, days: Int = 30): List<ScreenT
             totals[date] = (totals[date] ?: 0L) + (segmentEnd - cursor)
             cursor = segmentEnd
         }
+    }
+    if (totals.values.none { it > 0L }) {
+        manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startMillis, endMillis)
+            .orEmpty()
+            .forEach { stat ->
+                val date = java.time.Instant.ofEpochMilli(stat.lastTimeUsed).atZone(zone).toLocalDate()
+                totals[date] = (totals[date] ?: 0L) + stat.totalTimeInForeground
+            }
     }
     return (0 until days).map { offset ->
         val date = firstDay.plusDays(offset.toLong())
