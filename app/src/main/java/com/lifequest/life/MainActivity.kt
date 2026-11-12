@@ -991,17 +991,28 @@ fun CollectionScreen(
 fun RewardsScreen(
     padding: PaddingValues,
     coins: Int,
+    activePetId: String?,
+    equippedAccessory: String,
+    onEquipAccessory: (String) -> Unit,
     onSpend: (Int) -> Unit
 ) {
     Column(
-        Modifier.fillMaxSize().padding(padding).padding(20.dp),
+        Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         val context = androidx.compose.ui.platform.LocalContext.current
         val dataPrefs = remember { context.getSharedPreferences("life_data", Context.MODE_PRIVATE) }
-        val accessoryCatalog = listOf("🎀" to "Nœud", "👑" to "Couronne", "🕶️" to "Lunettes", "🌸" to "Fleur", "⭐" to "Étoile", "🧣" to "Écharpe")
+        val accessoryCatalog = listOf(
+            "🎀" to "Nœud", "👑" to "Couronne", "🕶️" to "Lunettes", "🌸" to "Fleur",
+            "⭐" to "Étoile", "🧣" to "Écharpe", "🧢" to "Casquette", "🎩" to "Chapeau",
+            "👒" to "Chapeau fleuri", "🪄" to "Baguette", "🪽" to "Ailes", "🦋" to "Papillon",
+            "💎" to "Diamant", "🌙" to "Lune", "☀️" to "Soleil", "🍀" to "Trèfle",
+            "🌈" to "Arc-en-ciel", "🧤" to "Moufles", "🧥" to "Manteau", "🥽" to "Lunettes de ski",
+            "🎧" to "Casque audio", "🎒" to "Sac à dos", "🛡️" to "Bouclier", "⚽" to "Ballon",
+            "🎓" to "Chapeau de diplômé", "🪷" to "Fleur de lotus", "🍓" to "Fraise",
+            "🪸" to "Corail", "🧿" to "Amulette", "🔮" to "Cristal magique"
+        )
         var ownedAccessories by remember { mutableStateOf(dataPrefs.getStringSet("ownedAccessories", emptySet())?.toSet() ?: emptySet()) }
-        var equippedAccessory by remember { mutableStateOf(dataPrefs.getString("equippedAccessory", "") ?: "") }
         Text("Tes récompenses", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Ink)
         Text("Tu as $coins pièces à dépenser.", color = Muted)
         RewardCard("Pause détente", "15 minutes de pause téléphone", "☕", 20, canAfford = coins >= 20) {
@@ -1015,7 +1026,10 @@ fun RewardsScreen(
                 .putLong("breakUntil", System.currentTimeMillis() + 30 * 60 * 1000L).apply()
         }
         Text("Boutique d'accessoires", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink)
-        Text("Achète un accessoire, puis équipe celui que tu préfères.", color = Muted, fontSize = 12.sp)
+        Text("30 accessoires à collectionner. Chaque nouveau compagnon commence sans accessoire.", color = Muted, fontSize = 12.sp)
+        if (activePetId == null) {
+            Text("Tu pourras équiper tes accessoires dès que tu auras un nouveau compagnon actif.", color = Orange, fontSize = 12.sp)
+        }
         accessoryCatalog.forEach { (emoji, name) ->
             val owned = emoji in ownedAccessories
             Surface(shape = RoundedCornerShape(18.dp), color = Color.White, modifier = Modifier.fillMaxWidth()) {
@@ -1024,26 +1038,26 @@ fun RewardsScreen(
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(name, fontWeight = FontWeight.Bold, color = Ink)
-                        Text(if (equippedAccessory == emoji) "Équipé" else if (owned) "Dans ta collection" else "25 pièces", color = Muted, fontSize = 11.sp)
+                        Text(if (equippedAccessory == emoji) "Équipé sur ton compagnon" else if (owned) "Dans ta collection" else "${if (name.contains("Couronne") || name.contains("Ailes") || name.contains("Bouclier")) 45 else 25} pièces", color = Muted, fontSize = 11.sp)
                     }
                     if (owned) {
-                        TextButton(onClick = {
-                            equippedAccessory = if (equippedAccessory == emoji) "" else emoji
-                            dataPrefs.edit().putString("equippedAccessory", equippedAccessory).apply()
+                        TextButton(enabled = activePetId != null, onClick = {
+                            onEquipAccessory(if (equippedAccessory == emoji) "" else emoji)
                         }) { Text(if (equippedAccessory == emoji) "Retirer" else "Équiper") }
                     } else {
-                        TextButton(enabled = coins >= 25, onClick = {
-                            onSpend(25)
+                        val cost = if (name.contains("Couronne") || name.contains("Ailes") || name.contains("Bouclier")) 45 else 25
+                        TextButton(enabled = coins >= cost, onClick = {
+                            onSpend(cost)
                             ownedAccessories = ownedAccessories + emoji
-                            equippedAccessory = emoji
-                            dataPrefs.edit().putStringSet("ownedAccessories", ownedAccessories)
-                                .putString("equippedAccessory", equippedAccessory).apply()
+                            dataPrefs.edit().putStringSet("ownedAccessories", ownedAccessories).apply()
+                            if (activePetId != null) onEquipAccessory(emoji)
                         }) { Text("Acheter") }
                     }
                 }
             }
         }
         Text("Accessoire actuellement équipé : " + (equippedAccessory.ifBlank { "aucun" }), color = Muted, fontSize = 12.sp)
+        Text("Les accessoires achetés restent dans ta collection, mais chaque nouvel animal arrive sans équipement.", color = Muted, fontSize = 11.sp)
     }
 }
 
